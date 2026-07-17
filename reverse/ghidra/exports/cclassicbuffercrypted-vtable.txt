@@ -1,0 +1,66 @@
+vftable=CClassicBufferCrypted::vftable
+address=00cfc7b8
+00 +0x00 0089cc80 FUN_0089cc80
+01 +0x04 0089c900 FUN_0089c900
+02 +0x08 0089c940 FUN_0089c940
+03 +0x0C 0089c9c0 FUN_0089c9c0
+04 +0x10 0089c020 FUN_0089c020
+05 +0x14 0089bfd0 FUN_0089bfd0
+06 +0x18 0089bfc0 FUN_0089bfc0
+07 +0x1C 0089c030 FUN_0089c030
+08 +0x20 0089bf70 FUN_0089bf70
+09 +0x24 0089c050 FUN_0089c050
+10 +0x28 6564614e <not a function>
+11 +0x2C 6c69466f <not a function>
+12 +0x30 00000065 <not a function>
+13 +0x34 00000000 <not a function>
+14 +0x38 00000000 <not a function>
+15 +0x3C 00000000 <not a function>
+16 +0x40 00000000 <not a function>
+17 +0x44 00000000 <not a function>
+18 +0x48 00000000 <not a function>
+19 +0x4C 00000000 <not a function>
+20 +0x50 00000000 <not a function>
+21 +0x54 00000000 <not a function>
+22 +0x58 00000000 <not a function>
+23 +0x5C 00000000 <not a function>
+24 +0x60 00000000 <not a function>
+25 +0x64 00000000 <not a function>
+26 +0x68 00000000 <not a function>
+27 +0x6C 00000000 <not a function>
+28 +0x70 00000000 <not a function>
+29 +0x74 00000000 <not a function>
+30 +0x78 00000000 <not a function>
+31 +0x7C 00000000 <not a function>
+32 +0x80 00000000 <not a function>
+33 +0x84 00000000 <not a function>
+34 +0x88 00000000 <not a function>
+35 +0x8C 00000000 <not a function>
+36 +0x90 00000000 <not a function>
+37 +0x94 00000000 <not a function>
+38 +0x98 00000000 <not a function>
+39 +0x9C 00000000 <not a function>
+40 +0xA0 00000000 <not a function>
+41 +0xA4 00000000 <not a function>
+42 +0xA8 00000000 <not a function>
+43 +0xAC 00000000 <not a function>
+44 +0xB0 00000000 <not a function>
+45 +0xB4 00000000 <not a function>
+46 +0xB8 00000000 <not a function>
+47 +0xBC 00000000 <not a function>
+48 +0xC0 00000000 <not a function>
+49 +0xC4 00000000 <not a function>
+50 +0xC8 00000000 <not a function>
+51 +0xCC 00000000 <not a function>
+52 +0xD0 00000000 <not a function>
+53 +0xD4 00000000 <not a function>
+54 +0xD8 00000000 <not a function>
+55 +0xDC 00000000 <not a function>
+56 +0xE0 00000000 <not a function>
+57 +0xE4 00000000 <not a function>
+58 +0xE8 00000000 <not a function>
+59 +0xEC 00000000 <not a function>
+60 +0xF0 00000000 <not a function>
+61 +0xF4 00000000 <not a function>
+62 +0xF8 00000000 <not a function>
+63 +0xFC 00000000 <not a function>

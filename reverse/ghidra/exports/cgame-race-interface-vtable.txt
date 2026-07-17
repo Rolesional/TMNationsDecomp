@@ -1,0 +1,98 @@
+vftable=CGameRaceInterface::vftable
+address=00cc9934
+00 +0x00 00402000 FUN_00402000
+01 +0x04 0075c190 FUN_0075c190
+02 +0x08 00aafd20 FUN_00aafd20
+03 +0x0C 0075c170 FUN_0075c170
+04 +0x10 0075d280 FUN_0075d280
+05 +0x14 00402030 FUN_00402030
+06 +0x18 00425f60 FUN_00425f60
+07 +0x1C 00425ac0 FUN_00425ac0
+08 +0x20 00427460 FUN_00427460
+09 +0x24 00427470 FUN_00427470
+10 +0x28 00426120 FUN_00426120
+11 +0x2C 00426de0 FUN_00426de0
+12 +0x30 00426e00 FUN_00426e00
+13 +0x34 00425b90 FUN_00425b90
+14 +0x38 00426160 FUN_00426160
+15 +0x3C 00426e20 FUN_00426e20
+16 +0x40 00426f10 FUN_00426f10
+17 +0x44 00402040 FUN_00402040
+18 +0x48 00402050 FUN_00402050
+19 +0x4C 00425b30 FUN_00425b30
+20 +0x50 00425b40 FUN_00425b40
+21 +0x54 00425b50 FUN_00425b50
+22 +0x58 00425b60 FUN_00425b60
+23 +0x5C 00427390 FUN_00427390
+24 +0x60 00425b70 FUN_00425b70
+25 +0x64 00425b80 FUN_00425b80
+26 +0x68 00402060 FUN_00402060
+27 +0x6C 00402070 FUN_00402070
+28 +0x70 00402080 FUN_00402080
+29 +0x74 00402090 FUN_00402090
+30 +0x78 004020a0 FUN_004020a0
+31 +0x7C 0057c630 FUN_0057c630
+32 +0x80 0057c070 FUN_0057c070
+33 +0x84 0057c110 FUN_0057c110
+34 +0x88 0057cb00 FUN_0057cb00
+35 +0x8C 0057cee0 FUN_0057cee0
+36 +0x90 0057b9e0 FUN_0057b9e0
+37 +0x94 0057b950 FUN_0057b950
+38 +0x98 004037eb __purecall
+39 +0x9C 0057cac0 FUN_0057cac0
+40 +0xA0 0057ba00 FUN_0057ba00
+41 +0xA4 0057be50 FUN_0057be50
+42 +0xA8 6562614c <not a function>
+43 +0xAC 756f526c <not a function>
+44 +0xB0 6f50646e <not a function>
+45 +0xB4 73746e69 <not a function>
+46 +0xB8 696d694c <not a function>
+47 +0xBC 00000074 <not a function>
+48 +0xC0 6562614c <not a function>
+49 +0xC4 6165546c <not a function>
+50 +0xC8 696f506d <not a function>
+51 +0xCC 4c73746e <not a function>
+52 +0xD0 74696d69 <not a function>
+53 +0xD4 00000000 <not a function>
+54 +0xD8 72746e45 <not a function>
+55 +0xDC 756f5279 <not a function>
+56 +0xE0 6f50646e <not a function>
+57 +0xE4 73746e69 <not a function>
+58 +0xE8 696d694c <not a function>
+59 +0xEC 00000074 <not a function>
+60 +0xF0 72746e45 <not a function>
+61 +0xF4 61655479 <not a function>
+62 +0xF8 696f506d <not a function>
+63 +0xFC 4c73746e <not a function>
+64 +0x100 74696d69 <not a function>
+65 +0x104 00000000 <not a function>
+66 +0x108 69736f50 <not a function>
+67 +0x10C 6e6f6974 <not a function>
+68 +0x110 69746341 <not a function>
+69 +0x114 00006576 <not a function>
+70 +0x118 74786554 <not a function>
+71 +0x11C 65636152 <not a function>
+72 +0x120 6f726843 <not a function>
+73 +0x124 72456f6e <not a function>
+74 +0x128 00726f72 <not a function>
+75 +0x12C 74786554 <not a function>
+76 +0x130 65636152 <not a function>
+77 +0x134 6f726843 <not a function>
+78 +0x138 61576f6e <not a function>
+79 +0x13C 6e696e72 <not a function>
+80 +0x140 00000067 <not a function>
+81 +0x144 74786554 <not a function>
+82 +0x148 65636152 <not a function>
+83 +0x14C 6f726843 <not a function>
+84 +0x150 00006f6e <not a function>
+85 +0x154 6e776f44 <not a function>
+86 +0x158 64616f6c <not a function>
+87 +0x15C 676f7250 <not a function>
+88 +0x160 73736572 <not a function>
+89 +0x164 79616c50 <not a function>
+90 +0x168 43737265 <not a function>
+91 +0x16C 00007275 <not a function>
+92 +0x170 6e776f44 <not a function>
+93 +0x174 64616f6c <not a function>
+94 +0x178 676f7250 <not a function>
+95 +0x17C 73736572 <not a function>

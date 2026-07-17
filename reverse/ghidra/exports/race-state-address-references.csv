@@ -1,0 +1,13 @@
+targetAddress,fromAddress,functionAddress,functionName,referenceType,instruction
+"00cbd560","00700b45","00700af0","FUN_00700af0","DATA","MOV dword ptr [EAX],0xcbd560"
+"00cbd560","0070125e","00700af0","FUN_00700af0","READ","MOV EDX,dword ptr [EAX]"
+"00cbd560","007013df","00700af0","FUN_00700af0","READ","MOV EAX,dword ptr [EDX]"
+"00cbd560","007012c1","00700af0","FUN_00700af0","READ","MOV EAX,dword ptr [EDX]"
+"00cc17dc","0070dca8","0070dca0","FUN_0070dca0","DATA","MOV dword ptr [ESI],0xcc17dc"
+"00cc17dc","0070cf89","0070cf60","FUN_0070cf60","DATA","MOV dword ptr [ESI],0xcc17dc"
+"00cbce74","006fd88e","006fd850","FUN_006fd850","DATA","MOV dword ptr [ESI],0xcbce74"
+"00cbce74","006fd9a9","006fd980","FUN_006fd980","DATA","MOV dword ptr [ESI],0xcbce74"
+"00cc1e9c","00719828","00719800","FUN_00719800","DATA","MOV dword ptr [ESI],0xcc1e9c"
+"00cc1e9c","0071cc9c","0071cc60","FUN_0071cc60","DATA","MOV dword ptr [ESI],0xcc1e9c"
+"00d299ac","00a8e5d1","00a8e5a0","FUN_00a8e5a0","DATA","MOV dword ptr [ESI],0xd299ac"
+"00d299ac","00a8e6c8","00a8e6a0","FUN_00a8e6a0","DATA","MOV dword ptr [ESI],0xd299ac"

@@ -1,0 +1,9 @@
+program=TmForever.exe
+language=x86:LE:32:default
+compiler=windows
+imageBase=00400000
+functions=67840
+definedStrings=26769
+classStrings=1874
+classStringReferences=1544
+imports=412

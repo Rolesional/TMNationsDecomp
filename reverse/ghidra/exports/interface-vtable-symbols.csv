@@ -1,0 +1,12 @@
+address,qualifiedName
+"00c7db38","CMwCmdParamInterface::vftable"
+"00c988d4","CGamePlaygroundInterface::vftable"
+"00ca334c","CGameInterface::vftable"
+"00cc9934","CGameRaceInterface::vftable"
+"00cca4cc","CTrackManiaRaceInterface::vftable"
+"00ccc81c","CTrackManiaEditorInterface::vftable"
+"00cfa458","CMwCmdIdentInterface::vftable"
+"00cfa460","CMwCmdFunctionInterface::vftable"
+"00d270dc","CControlKeyboardInterface::vftable"
+"00d37944","CPfmMeshInterface::vftable"
+"00d9aa6c","CCryptoPP_NadeoInterface::vftable"

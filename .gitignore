@@ -1,0 +1,17 @@
+/TmNationsForever/
+/.tools/
+/.gradle/
+/.idea/
+/local.properties
+**/build/
+**/.cxx/
+*.iml
+
+# Ghidra project databases and bulk decompiler output are reproducible but large.
+/reverse/ghidra/projects/
+/reverse/ghidra/exports/decompiled/
+/reverse/ghidra/exports/functions.csv
+/reverse/ghidra/exports/defined-strings.csv
+
+# Generated local analysis output.
+/analysis/generated/
