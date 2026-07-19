@@ -167,6 +167,8 @@ bool isClassOrDerived(std::uint32_t classId, const std::uint32_t baseClassId) {
   return false;
 }
 
+enum class UnitGroup { None, Ground, Air };
+
 class BlockInfoParser final {
 public:
   BlockInfoParser(Input& input, const DocumentProbe& document)
@@ -269,7 +271,16 @@ private:
     if (!reader_.readI32(index)) {
       return false;
     }
-    if (index == -1 || records_.contains(index)) {
+    if (index == -1) {
+      return true;
+    }
+    if (const auto existing = records_.find(index); existing != records_.end()) {
+      if (existing->second == kBlockUnitInfoClassId) {
+        const auto offset = unitOffsets_.find(index);
+        if (offset != unitOffsets_.end()) {
+          includeUnitOffset(offset->second);
+        }
+      }
       return true;
     }
     if (index < 0) {
@@ -281,7 +292,7 @@ private:
     }
     records_.emplace(index, classId);
     if (classId == kBlockUnitInfoClassId) {
-      return initializeNode(classId) && readBlockUnitInfo();
+      return initializeNode(classId) && readBlockUnitInfo(index);
     }
     if (classId == kSceneMobilClassId) {
       return initializeNode(classId) && readSceneMobil();
@@ -315,7 +326,20 @@ private:
     return reader_.skip(static_cast<std::size_t>(size));
   }
 
-  bool readBlockUnitInfo() {
+  void includeUnitOffset(const std::array<std::int32_t, 3>& offset) {
+    std::array<std::int32_t, 2>* footprint = nullptr;
+    if (unitGroup_ == UnitGroup::Ground) {
+      footprint = &blockInfo_.groundFootprint;
+    } else if (unitGroup_ == UnitGroup::Air) {
+      footprint = &blockInfo_.airFootprint;
+    }
+    if (footprint != nullptr) {
+      (*footprint)[0] = std::max((*footprint)[0], offset[0] + 1);
+      (*footprint)[1] = std::max((*footprint)[1], offset[2] + 1);
+    }
+  }
+
+  bool readBlockUnitInfo(const std::int32_t nodeIndex) {
     while (true) {
       std::uint32_t chunkId = 0;
       if (!reader_.readU32(chunkId)) {
@@ -328,11 +352,15 @@ private:
       case 0x03036000U: {
         std::int32_t ignored = 0;
         bool ignoredBoolean = false;
+        std::array<std::int32_t, 3> offset{};
         if (!reader_.readI32(ignored) || !reader_.readBoolean(ignoredBoolean) ||
-            !reader_.readBoolean(ignoredBoolean) || !reader_.skip(12U) ||
+            !reader_.readBoolean(ignoredBoolean) || !reader_.readI32(offset[0]) ||
+            !reader_.readI32(offset[1]) || !reader_.readI32(offset[2]) ||
             !readNodeReferenceArray()) {
           return false;
         }
+        unitOffsets_.insert_or_assign(nodeIndex, offset);
+        includeUnitOffset(offset);
         break;
       }
       case 0x03036001U: {
@@ -550,10 +578,18 @@ private:
       bool ignoredBoolean = false;
       std::int32_t ignored = 0;
       if (!readId(ignoredId) || !reader_.skip(12U) || !reader_.readBoolean(ignoredBoolean) ||
-          !reader_.skip(8U) || !readNodeReference() || !readNodeReferenceArray() ||
-          !readNodeReferenceArray()) {
+          !reader_.skip(8U) || !readNodeReference()) {
         return false;
       }
+      unitGroup_ = UnitGroup::Ground;
+      if (!readNodeReferenceArray()) {
+        return false;
+      }
+      unitGroup_ = UnitGroup::Air;
+      if (!readNodeReferenceArray()) {
+        return false;
+      }
+      unitGroup_ = UnitGroup::None;
       for (int group = 0; group < 2; ++group) {
         std::int32_t variantCount = 0;
         if (!reader_.readCount(variantCount, "mobil variant")) {
@@ -600,9 +636,11 @@ private:
   Reader reader_;
   const DocumentProbe& document_;
   std::unordered_map<std::int32_t, std::uint32_t> records_;
+  std::unordered_map<std::int32_t, std::array<std::int32_t, 3>> unitOffsets_;
   std::optional<std::int32_t> idVersion_;
   std::unordered_map<std::uint32_t, std::string> ids_;
   BlockInfoMetadata blockInfo_;
+  UnitGroup unitGroup_ = UnitGroup::None;
   bool complete_ = false;
 };
 

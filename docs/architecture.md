@@ -41,12 +41,17 @@ without contaminating recovered gameplay code.
    now joins the original campaign container to loose maps by UID and can load any of the
    65 source-ordered scenes from its native selector.
 5. **Initial gameplay path complete:** portable action state, Android adapters, an
-   instanced 176,464-triangle collision scene, ground and horizontal wall queries,
+   instanced 176,328-triangle collision scene with source material IDs and
+   `NotCollidable` filtering, ground and exact triangle/ellipsoid contact queries,
    deterministic vehicle stepping, ordered checkpoint/finish/lap triggers, race timing,
-   respawn/saved state, the recovered Stadium car low LOD, and a chase camera are live.
-   Exact start transforms are decoded; recovered vehicle physics and exact contact
-   response remain.
+   road-safe respawn/saved state, the recovered Stadium car low LOD with steering front
+   wheels, and the ordinary Race3 angle-aware loose-follow camera are live. Exact
+   start/waypoint transforms, authored body ellipsoids, and the active source vehicle
+   tuning are decoded; remaining wheel multi-contact reduction and broader vehicle state
+   machines are still being recovered.
 6. **In progress:** the original LED HUD, 65-map selector, author targets, atomic best-time
-   persistence, and original checkpoint/finish audio are operational. Exact unlock rules,
-   broader menus, replays, vehicle/game audio, and recovered physics remain.
+   persistence, executable-proven 3/2/1/Go start gate, and original countdown/checkpoint/
+   finish audio, numeric speed, and four-button multi-touch driving overlay are
+   operational. Exact unlock rules, broader menus, replays, engine/surface/skid audio,
+   and recovered contact physics remain.
 7. Editors and online systems after the offline 65-track campaign is compatible.

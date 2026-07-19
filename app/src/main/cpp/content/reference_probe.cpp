@@ -6,8 +6,12 @@
 #include "tmnf/image/dds.hpp"
 #include "tmnf/pak/vfs.hpp"
 
+#include <android/log.h>
+
 #include <algorithm>
+#include <cerrno>
 #include <cstddef>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -25,9 +29,21 @@ constexpr std::string_view kCampaignPath =
     "Tracks\\Campaigns\\Nations\\Nations.ConstructionCampaign.Gbx";
 constexpr std::string_view kStaleCampaignUid = "Nk8jftxeWaIICIOEGV8M_cV3gba";
 constexpr std::string_view kVehicleSolidPath = "Vehicles\\Media\\Solid\\StadiumCar.Solid.Gbx";
+constexpr std::string_view kVehicleTuningsPath =
+    "Vehicles\\VehicleTunings\\StadiumCar.VehicleTunings.Gbx";
+constexpr std::string_view kSoundEnginePath =
+    "Vehicles\\Media\\Audio\\Sound\\StadiumCarEngine.SoundEngine.Gbx";
+constexpr std::string_view kVehicleSoundRoot = "Vehicles\\Media\\Audio\\Sound\\";
 constexpr std::string_view kCheckpointSoundPath =
     "Interface\\Media\\Audio\\Sound\\Wav\\RaceCheckPoint.wav";
 constexpr std::string_view kFinishSoundPath = "Interface\\Media\\Audio\\Sound\\Wav\\RaceFinish.wav";
+constexpr std::string_view kCountdown1SoundPath =
+    "Interface\\Media\\Audio\\Sound\\Wav\\Race1.wav";
+constexpr std::string_view kCountdown2SoundPath =
+    "Interface\\Media\\Audio\\Sound\\Wav\\Race2.wav";
+constexpr std::string_view kCountdown3SoundPath =
+    "Interface\\Media\\Audio\\Sound\\Wav\\Race3.wav";
+constexpr std::string_view kGoSoundPath = "Interface\\Media\\Audio\\Sound\\Wav\\RaceGo.wav";
 constexpr std::string_view kHudFontPath = "Interface\\Media\\Font\\Led_Textures\\Led_00.dds";
 
 ReferenceProbeResult probeFail(std::string message) {
@@ -45,6 +61,8 @@ ReferenceCampaignResult campaignFail(std::string message) {
 bool readFile(const std::filesystem::path& path, std::vector<std::byte>& output) {
   std::ifstream stream(path, std::ios::binary);
   if (!stream) {
+    __android_log_print(ANDROID_LOG_WARN, "TMNF", "Unable to open %s: %s",
+                        path.string().c_str(), std::strerror(errno));
     return false;
   }
   stream.seekg(0, std::ios::end);
@@ -77,6 +95,31 @@ std::filesystem::path nativePath(const std::string_view virtualPath) {
   return result;
 }
 
+std::optional<std::filesystem::path> safeNativeRelativePath(
+    const std::string_view virtualPath) {
+  if (virtualPath.empty() || virtualPath.front() == '\\' || virtualPath.front() == '/') {
+    return std::nullopt;
+  }
+  std::filesystem::path result;
+  std::size_t begin = 0;
+  while (begin < virtualPath.size()) {
+    const std::size_t separator = virtualPath.find_first_of("\\/", begin);
+    const std::size_t end = separator == std::string_view::npos ? virtualPath.size() : separator;
+    const std::string_view component = virtualPath.substr(begin, end - begin);
+    if (component.empty() || component == "." || component == ".." ||
+        component.find(':') != std::string_view::npos ||
+        component.find('\0') != std::string_view::npos) {
+      return std::nullopt;
+    }
+    result /= std::string(component);
+    if (separator == std::string_view::npos) {
+      break;
+    }
+    begin = separator + 1U;
+  }
+  return result.empty() ? std::nullopt : std::optional{std::move(result)};
+}
+
 bool endsWithChallengeExtension(const std::string_view name) noexcept {
   constexpr std::string_view suffix = ".Challenge.Gbx";
   if (name.size() < suffix.size()) {
@@ -93,11 +136,11 @@ bool endsWithChallengeExtension(const std::string_view name) noexcept {
 
 } // namespace
 
-ReferenceCampaignResult loadReferenceCampaign(const char* const externalDataPath) {
-  if (externalDataPath == nullptr || *externalDataPath == '\0') {
+ReferenceCampaignResult loadReferenceCampaign(const char* const dataRootPath) {
+  if (dataRootPath == nullptr || *dataRootPath == '\0') {
     return campaignFail("Android external data path is unavailable");
   }
-  const std::filesystem::path gameDataRoot = std::filesystem::path(externalDataPath) / "GameData";
+  const std::filesystem::path gameDataRoot = std::filesystem::path(dataRootPath) / "GameData";
   std::vector<std::byte> campaignRaw;
   if (!readFile(gameDataRoot / nativePath(kCampaignPath), campaignRaw)) {
     return campaignFail("Nations campaign container is not installed");
@@ -169,12 +212,12 @@ ReferenceCampaignResult loadReferenceCampaign(const char* const externalDataPath
   return result;
 }
 
-ReferenceProbeResult loadReferenceContent(const char* const externalDataPath,
+ReferenceProbeResult loadReferenceContent(const char* const dataRootPath,
                                           const std::string_view challengePath) {
-  if (externalDataPath == nullptr || *externalDataPath == '\0') {
+  if (dataRootPath == nullptr || *dataRootPath == '\0') {
     return probeFail("Android external data path is unavailable");
   }
-  const std::filesystem::path packRoot = std::filesystem::path(externalDataPath) / "Packs";
+  const std::filesystem::path packRoot = std::filesystem::path(dataRootPath) / "Packs";
   std::vector<std::byte> packListRaw;
   std::vector<std::byte> resourceRaw;
   std::vector<std::byte> stadiumRaw;
@@ -211,12 +254,20 @@ ReferenceProbeResult loadReferenceContent(const char* const externalDataPath,
     return probeFail("reference DDS decode failed: " + decoded.error);
   }
 
-  const std::filesystem::path gameDataRoot = std::filesystem::path(externalDataPath) / "GameData";
+  const std::filesystem::path gameDataRoot = std::filesystem::path(dataRootPath) / "GameData";
   std::vector<std::byte> checkpointSound;
   std::vector<std::byte> finishSound;
+  std::vector<std::byte> countdown1Sound;
+  std::vector<std::byte> countdown2Sound;
+  std::vector<std::byte> countdown3Sound;
+  std::vector<std::byte> goSound;
   image::RgbaImage hudFont;
   (void)readFile(gameDataRoot / nativePath(kCheckpointSoundPath), checkpointSound);
   (void)readFile(gameDataRoot / nativePath(kFinishSoundPath), finishSound);
+  (void)readFile(gameDataRoot / nativePath(kCountdown1SoundPath), countdown1Sound);
+  (void)readFile(gameDataRoot / nativePath(kCountdown2SoundPath), countdown2Sound);
+  (void)readFile(gameDataRoot / nativePath(kCountdown3SoundPath), countdown3Sound);
+  (void)readFile(gameDataRoot / nativePath(kGoSoundPath), goSound);
   std::vector<std::byte> hudFontRaw;
   if (readFile(gameDataRoot / nativePath(kHudFontPath), hudFontRaw)) {
     image::DecodeResult decodedHudFont = image::decodeDds(hudFontRaw);
@@ -245,6 +296,39 @@ ReferenceProbeResult loadReferenceContent(const char* const externalDataPath,
       buildTrackScene(std::move(parsedChallenge.challenge), vfs, looseReader);
   if (!builtScene) {
     return probeFail("campaign scene construction failed: " + builtScene.error);
+  }
+
+  pak::VfsOpenResult vehicleTuningsInput = vfs.openFile(kVehicleTuningsPath);
+  if (!vehicleTuningsInput) {
+    return probeFail("StadiumCar tunings are unavailable: " + vehicleTuningsInput.error);
+  }
+  gbx::VehicleTuningsParseResult vehicleTunings =
+      gbx::parseVehicleTunings(*vehicleTuningsInput.input);
+  if (!vehicleTunings || vehicleTunings.tunings.active() == nullptr) {
+    return probeFail("StadiumCar tuning parse failed: " + vehicleTunings.error);
+  }
+
+  pak::VfsOpenResult soundEngineInput = vfs.openFile(kSoundEnginePath);
+  if (!soundEngineInput) {
+    return probeFail("StadiumCar sound engine is unavailable: " + soundEngineInput.error);
+  }
+  gbx::SoundEngineParseResult soundEngine = gbx::parseSoundEngine(*soundEngineInput.input);
+  if (!soundEngine) {
+    return probeFail("StadiumCar sound-engine parse failed: " + soundEngine.error);
+  }
+  std::vector<std::vector<std::byte>> engineSounds(soundEngine.engine.components.size());
+  const std::filesystem::path vehicleSoundRoot = gameDataRoot / nativePath(kVehicleSoundRoot);
+  for (std::size_t index = 0; index < soundEngine.engine.components.size(); ++index) {
+    const std::string& relativePath = soundEngine.engine.components[index].soundPath;
+    const std::optional<std::filesystem::path> nativeRelativePath =
+        safeNativeRelativePath(relativePath);
+    if (!nativeRelativePath) {
+      return probeFail("StadiumCar engine WAV path is unsafe: " + relativePath);
+    }
+    const std::string path = std::string(kVehicleSoundRoot) + relativePath;
+    if (!readFile(vehicleSoundRoot / *nativeRelativePath, engineSounds[index])) {
+      return probeFail("StadiumCar engine WAV is not installed: " + path);
+    }
   }
 
   pak::VfsOpenResult vehicleInput = vfs.openFile(kVehicleSolidPath);
@@ -277,8 +361,15 @@ ReferenceProbeResult loadReferenceContent(const char* const externalDataPath,
   result.scene = std::move(builtScene.scene);
   result.vehicleSolid = std::move(vehicle.solid);
   result.vehicleMaterials = std::move(vehicleMaterials.materials);
+  result.vehicleTunings = std::move(vehicleTunings.tunings);
+  result.soundEngine = std::move(soundEngine.engine);
+  result.engineSounds = std::move(engineSounds);
   result.checkpointSound = std::move(checkpointSound);
   result.finishSound = std::move(finishSound);
+  result.countdown1Sound = std::move(countdown1Sound);
+  result.countdown2Sound = std::move(countdown2Sound);
+  result.countdown3Sound = std::move(countdown3Sound);
+  result.goSound = std::move(goSound);
   return result;
 }
 

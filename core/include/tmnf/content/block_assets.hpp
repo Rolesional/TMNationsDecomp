@@ -3,6 +3,7 @@
 #include "tmnf/gbx/block_info.hpp"
 #include "tmnf/pak/vfs.hpp"
 
+#include <array>
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -26,6 +27,8 @@ struct BlockAssetGraph final {
   std::string blockName;
   std::string blockInfoPath;
   std::optional<gbx::BlockInfoMetadata> metadata;
+  std::array<std::int32_t, 2> groundFootprint{1, 1};
+  std::array<std::int32_t, 2> airFootprint{1, 1};
   std::vector<BlockSolidAsset> solids;
   std::vector<BlockSolidAsset> triggerSolids;
   std::vector<std::string> unresolvedReferences;

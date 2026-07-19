@@ -291,8 +291,12 @@ BlockAssetResolveResult resolveBlockAssets(const std::string_view collection,
     return failed("unable to open construction BlockInfo metadata for " + std::string(blockName));
   }
   gbx::BlockInfoParseResult metadata = gbx::parseBlockInfo(*metadataInput.input);
-  if (metadata && metadata.blockInfo.waypointType != gbx::BlockWaypointType::None) {
-    result.graph.metadata = std::move(metadata.blockInfo);
+  if (metadata) {
+    result.graph.groundFootprint = metadata.blockInfo.groundFootprint;
+    result.graph.airFootprint = metadata.blockInfo.airFootprint;
+    if (metadata.blockInfo.waypointType != gbx::BlockWaypointType::None) {
+      result.graph.metadata = std::move(metadata.blockInfo);
+    }
   }
   GraphResolver resolver(vfs, result.graph);
   if (!resolver.visit(*blockInfoPath, 0, true)) {

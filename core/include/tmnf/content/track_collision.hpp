@@ -53,11 +53,21 @@ struct TrackWallContact final {
   std::uint32_t triangleIndex = 0;
 };
 
+struct TrackEllipsoidContact final {
+  gbx::Float3 correction;
+  gbx::Float3 normal;
+  gbx::Float3 point;
+  float axisCorrection = 0.0F;
+  std::int16_t surfaceId = -1;
+  std::uint32_t triangleIndex = 0;
+};
+
 [[nodiscard]] gbx::Float3 transformIso4Point(const std::array<float, 12>& transform,
                                              gbx::Float3 point) noexcept;
 [[nodiscard]] gbx::Float3 rotateTrackVector(gbx::Float3 value, std::uint8_t direction) noexcept;
 [[nodiscard]] gbx::Float3 placeTrackPoint(gbx::Float3 value,
-                                          const gbx::ChallengeBlock& block) noexcept;
+                                          const gbx::ChallengeBlock& block,
+                                          std::array<std::int32_t, 2> footprint = {1, 1}) noexcept;
 
 // Instantiates every selected CPlugSurfaceGeom mesh in challenge space and
 // builds an X/Z cell index for deterministic vehicle-to-track queries.
@@ -71,7 +81,22 @@ struct TrackWallContact final {
 // Returns the deepest overlap between a sphere and a non-ground collision triangle.
 // The returned normal is horizontal and points away from the contacted surface.
 [[nodiscard]] std::optional<TrackWallContact>
-sampleTrackWallContact(const TrackCollision& collision, gbx::Float3 center, float radius) noexcept;
+sampleTrackWallContact(const TrackCollision& collision, gbx::Float3 center, float radius,
+                       float minimumContactY = -1.0e30F) noexcept;
+
+// Reduces the one-sided 008C1C70 contact to the movable ellipsoid's separation vector.
+// localToWorld is a row-major rotation; the deepest nonnegative correction along
+// selectionAxis is returned, including the source's zero-correction touching contact.
+[[nodiscard]] std::optional<TrackEllipsoidContact> sampleTrackEllipsoidContact(
+    const TrackCollision& collision, gbx::Float3 center, gbx::Float3 halfAxes,
+    const std::array<float, 9>& localToWorld, gbx::Float3 selectionAxis) noexcept;
+
+// Appends every accepted 008C1C70 triangle contact in deterministic grid order.
+// Repeated triangle references from adjacent broadphase cells are emitted once.
+void appendTrackEllipsoidContacts(const TrackCollision& collision, gbx::Float3 center,
+                                  gbx::Float3 halfAxes,
+                                  const std::array<float, 9>& localToWorld,
+                                  std::vector<TrackEllipsoidContact>& contacts);
 
 // Sweeps a point segment against a trigger mesh. Triangle winding is ignored.
 [[nodiscard]] bool segmentIntersectsTrackTrigger(const TrackTriggerMesh& trigger, gbx::Float3 from,

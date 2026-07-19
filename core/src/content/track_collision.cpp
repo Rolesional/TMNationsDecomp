@@ -8,6 +8,8 @@
 namespace tmnf::content {
 namespace {
 
+constexpr std::int16_t kNotCollidableSurfaceId = 28;
+
 TrackCollisionBuildResult failed(std::string message) {
   TrackCollisionBuildResult result;
   result.error = std::move(message);
@@ -39,49 +41,73 @@ gbx::Float3 multiply(const gbx::Float3 value, const float scalar) noexcept {
   return {value.x * scalar, value.y * scalar, value.z * scalar};
 }
 
+gbx::Float3 rotate(const std::array<float, 9>& matrix, const gbx::Float3 value) noexcept {
+  return {matrix[0] * value.x + matrix[1] * value.y + matrix[2] * value.z,
+          matrix[3] * value.x + matrix[4] * value.y + matrix[5] * value.z,
+          matrix[6] * value.x + matrix[7] * value.y + matrix[8] * value.z};
+}
+
+gbx::Float3 inverseRotate(const std::array<float, 9>& matrix,
+                          const gbx::Float3 value) noexcept {
+  return {matrix[0] * value.x + matrix[3] * value.y + matrix[6] * value.z,
+          matrix[1] * value.x + matrix[4] * value.y + matrix[7] * value.z,
+          matrix[2] * value.x + matrix[5] * value.y + matrix[8] * value.z};
+}
+
+enum class TriangleFeature { Face, Edge, Vertex };
+
 gbx::Float3 closestPointOnTriangle(const gbx::Float3 point, const gbx::Float3 a,
-                                   const gbx::Float3 b, const gbx::Float3 c) noexcept {
+                                   const gbx::Float3 b, const gbx::Float3 c,
+                                   TriangleFeature* const feature = nullptr) noexcept {
+  const auto found = [&](const gbx::Float3 closest, const TriangleFeature type) {
+    if (feature != nullptr) {
+      *feature = type;
+    }
+    return closest;
+  };
   const gbx::Float3 ab = subtract(b, a);
   const gbx::Float3 ac = subtract(c, a);
   const gbx::Float3 ap = subtract(point, a);
   const float d1 = dot(ab, ap);
   const float d2 = dot(ac, ap);
   if (d1 <= 0.0F && d2 <= 0.0F) {
-    return a;
+    return found(a, TriangleFeature::Vertex);
   }
 
   const gbx::Float3 bp = subtract(point, b);
   const float d3 = dot(ab, bp);
   const float d4 = dot(ac, bp);
   if (d3 >= 0.0F && d4 <= d3) {
-    return b;
+    return found(b, TriangleFeature::Vertex);
   }
 
   const float vc = d1 * d4 - d3 * d2;
   if (vc <= 0.0F && d1 >= 0.0F && d3 <= 0.0F) {
-    return add(a, multiply(ab, d1 / (d1 - d3)));
+    return found(add(a, multiply(ab, d1 / (d1 - d3))), TriangleFeature::Edge);
   }
 
   const gbx::Float3 cp = subtract(point, c);
   const float d5 = dot(ab, cp);
   const float d6 = dot(ac, cp);
   if (d6 >= 0.0F && d5 <= d6) {
-    return c;
+    return found(c, TriangleFeature::Vertex);
   }
 
   const float vb = d5 * d2 - d1 * d6;
   if (vb <= 0.0F && d2 >= 0.0F && d6 <= 0.0F) {
-    return add(a, multiply(ac, d2 / (d2 - d6)));
+    return found(add(a, multiply(ac, d2 / (d2 - d6))), TriangleFeature::Edge);
   }
 
   const float va = d3 * d6 - d5 * d4;
   if (va <= 0.0F && d4 - d3 >= 0.0F && d5 - d6 >= 0.0F) {
     const gbx::Float3 edge = subtract(c, b);
-    return add(b, multiply(edge, (d4 - d3) / ((d4 - d3) + (d5 - d6))));
+    return found(add(b, multiply(edge, (d4 - d3) / ((d4 - d3) + (d5 - d6)))),
+                 TriangleFeature::Edge);
   }
 
   const float denominator = 1.0F / (va + vb + vc);
-  return add(a, add(multiply(ab, vb * denominator), multiply(ac, vc * denominator)));
+  return found(add(a, add(multiply(ab, vb * denominator), multiply(ac, vc * denominator))),
+               TriangleFeature::Face);
 }
 
 gbx::Float3 normalize(gbx::Float3 value) noexcept {
@@ -102,10 +128,17 @@ std::int16_t triangleSurfaceId(const gbx::SolidModel& solid, const gbx::SolidCol
     return shape.surfaceId;
   }
   const std::int16_t materialIndex = shape.triangleSurfaceIndices[triangleIndex];
-  if (materialIndex >= 0 &&
-      static_cast<std::size_t>(materialIndex) < solid.surfaceMaterials.size() &&
-      solid.surfaceMaterials[static_cast<std::size_t>(materialIndex)] >= 0) {
-    return solid.surfaceMaterials[static_cast<std::size_t>(materialIndex)];
+  const std::size_t materialOffset =
+      shape.surfaceMaterialRange.has_value() ? (*shape.surfaceMaterialRange)[0] : 0U;
+  const std::size_t materialCount = shape.surfaceMaterialRange.has_value()
+                                        ? (*shape.surfaceMaterialRange)[1]
+                                        : solid.surfaceMaterials.size();
+  if (materialIndex >= 0 && static_cast<std::size_t>(materialIndex) < materialCount &&
+      materialOffset <= solid.surfaceMaterials.size() &&
+      static_cast<std::size_t>(materialIndex) <
+          solid.surfaceMaterials.size() - materialOffset &&
+      solid.surfaceMaterials[materialOffset + static_cast<std::size_t>(materialIndex)] >= 0) {
+    return solid.surfaceMaterials[materialOffset + static_cast<std::size_t>(materialIndex)];
   }
   return shape.surfaceId >= 0 ? shape.surfaceId : materialIndex;
 }
@@ -132,15 +165,27 @@ gbx::Float3 rotateTrackVector(const gbx::Float3 value, const std::uint8_t direct
   }
 }
 
-gbx::Float3 placeTrackPoint(const gbx::Float3 value, const gbx::ChallengeBlock& block) noexcept {
-  constexpr gbx::Float3 center{kTrackHorizontalCellSize * 0.5F, 0.0F,
-                               kTrackHorizontalCellSize * 0.5F};
-  gbx::Float3 centered{value.x - center.x, value.y, value.z - center.z};
-  const gbx::Float3 rotated = rotateTrackVector(centered, block.direction);
-  return {rotated.x + center.x + static_cast<float>(block.coordinate[0]) * kTrackHorizontalCellSize,
+gbx::Float3 placeTrackPoint(const gbx::Float3 value, const gbx::ChallengeBlock& block,
+                            const std::array<std::int32_t, 2> footprint) noexcept {
+  const float width = static_cast<float>(std::max(footprint[0], 1)) * kTrackHorizontalCellSize;
+  const float depth = static_cast<float>(std::max(footprint[1], 1)) * kTrackHorizontalCellSize;
+  gbx::Float3 rotated = value;
+  switch (block.direction & 3U) {
+  case 1:
+    rotated = {depth - value.z, value.y, value.x};
+    break;
+  case 2:
+    rotated = {width - value.x, value.y, depth - value.z};
+    break;
+  case 3:
+    rotated = {value.z, value.y, width - value.x};
+    break;
+  default:
+    break;
+  }
+  return {rotated.x + static_cast<float>(block.coordinate[0]) * kTrackHorizontalCellSize,
           rotated.y + static_cast<float>(block.coordinate[1]) * kTrackVerticalCellSize,
-          rotated.z + center.z +
-              static_cast<float>(block.coordinate[2]) * kTrackHorizontalCellSize};
+          rotated.z + static_cast<float>(block.coordinate[2]) * kTrackHorizontalCellSize};
 }
 
 TrackCollisionBuildResult buildTrackCollision(const TrackScene& scene) {
@@ -180,7 +225,8 @@ TrackCollisionBuildResult buildTrackCollision(const TrackScene& scene) {
       const std::uint32_t vertexBase = static_cast<std::uint32_t>(collision.positions.size());
       for (const gbx::Float3 source : shape.positions) {
         const gbx::Float3 position =
-            placeTrackPoint(transformIso4Point(shape.transform, source), block);
+            placeTrackPoint(transformIso4Point(shape.transform, source), block,
+                            placement.footprint);
         collision.positions.push_back(position);
         collision.bounds[0] = std::min(collision.bounds[0], position.x);
         collision.bounds[1] = std::min(collision.bounds[1], position.y);
@@ -193,10 +239,17 @@ TrackCollisionBuildResult buildTrackCollision(const TrackScene& scene) {
         if (index >= shape.positions.size()) {
           return failed("track collision mesh index is out of bounds");
         }
-        collision.indices.push_back(vertexBase + index);
       }
       for (std::size_t triangle = 0; triangle < shape.indices.size() / 3U; ++triangle) {
-        collision.triangleSurfaceIds.push_back(triangleSurfaceId(solid, shape, triangle));
+        const std::int16_t surfaceId = triangleSurfaceId(solid, shape, triangle);
+        if (surfaceId == kNotCollidableSurfaceId) {
+          continue;
+        }
+        const std::size_t first = triangle * 3U;
+        collision.indices.push_back(vertexBase + shape.indices[first]);
+        collision.indices.push_back(vertexBase + shape.indices[first + 1U]);
+        collision.indices.push_back(vertexBase + shape.indices[first + 2U]);
+        collision.triangleSurfaceIds.push_back(surfaceId);
       }
     }
   }
@@ -218,7 +271,8 @@ TrackCollisionBuildResult buildTrackCollision(const TrackScene& scene) {
       const std::uint32_t vertexBase = static_cast<std::uint32_t>(trigger.positions.size());
       for (const gbx::Float3 source : shape.positions) {
         trigger.positions.push_back(
-            placeTrackPoint(transformIso4Point(shape.transform, source), block));
+            placeTrackPoint(transformIso4Point(shape.transform, source), block,
+                            sourceTrigger.footprint));
       }
       for (const std::uint32_t index : shape.indices) {
         if (index >= shape.positions.size()) {
@@ -315,10 +369,11 @@ std::optional<TrackGroundHit> sampleTrackGround(const TrackCollision& collision,
 
 std::optional<TrackWallContact> sampleTrackWallContact(const TrackCollision& collision,
                                                        const gbx::Float3 center,
-                                                       const float radius) noexcept {
+                                                       const float radius,
+                                                       const float minimumContactY) noexcept {
   if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(center.z) ||
-      !std::isfinite(radius) || radius <= 0.0F || collision.gridWidth <= 0 ||
-      collision.gridDepth <= 0) {
+      !std::isfinite(radius) || radius <= 0.0F || !std::isfinite(minimumContactY) ||
+      collision.gridWidth <= 0 || collision.gridDepth <= 0) {
     return std::nullopt;
   }
   const int firstX =
@@ -351,6 +406,9 @@ std::optional<TrackWallContact> sampleTrackWallContact(const TrackCollision& col
         const gbx::Float3 a = collision.positions[collision.indices[first]];
         const gbx::Float3 b = collision.positions[collision.indices[first + 1U]];
         const gbx::Float3 c = collision.positions[collision.indices[first + 2U]];
+        if (std::max({a.y, b.y, c.y}) < minimumContactY) {
+          continue;
+        }
         const gbx::Float3 face = normalize(cross(subtract(b, a), subtract(c, a)));
         if (std::abs(face.y) > kMaximumWallVerticalNormal) {
           continue;
@@ -382,6 +440,146 @@ std::optional<TrackWallContact> sampleTrackWallContact(const TrackCollision& col
     }
   }
   return best;
+}
+
+template <typename Handler>
+void forEachTrackEllipsoidContact(const TrackCollision& collision, const gbx::Float3 center,
+                                  const gbx::Float3 halfAxes,
+                                  const std::array<float, 9>& localToWorld,
+                                  Handler&& handler) {
+  const bool validRotation = std::ranges::all_of(
+      localToWorld, [](const float value) { return std::isfinite(value); });
+  if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(center.z) ||
+      !std::isfinite(halfAxes.x) || !std::isfinite(halfAxes.y) ||
+      !std::isfinite(halfAxes.z) || halfAxes.x <= 0.0F || halfAxes.y <= 0.0F ||
+      halfAxes.z <= 0.0F || !validRotation || collision.gridWidth <= 0 ||
+      collision.gridDepth <= 0) {
+    return;
+  }
+  const float radius = std::max({halfAxes.x, halfAxes.y, halfAxes.z});
+  const int firstX =
+      std::max(0, static_cast<int>(std::floor((center.x - radius) / kTrackHorizontalCellSize)));
+  const int lastX = std::min(
+      collision.gridWidth - 1,
+      static_cast<int>(std::floor((center.x + radius) / kTrackHorizontalCellSize)));
+  const int firstZ =
+      std::max(0, static_cast<int>(std::floor((center.z - radius) / kTrackHorizontalCellSize)));
+  const int lastZ = std::min(
+      collision.gridDepth - 1,
+      static_cast<int>(std::floor((center.z + radius) / kTrackHorizontalCellSize)));
+  if (firstX > lastX || firstZ > lastZ) {
+    return;
+  }
+
+  const auto toUnit = [&](const gbx::Float3 point) {
+    const gbx::Float3 local = inverseRotate(localToWorld, subtract(point, center));
+    return gbx::Float3{local.x / halfAxes.x, local.y / halfAxes.y,
+                       local.z / halfAxes.z};
+  };
+  const auto fromUnitVector = [&](const gbx::Float3 value) {
+    return rotate(localToWorld,
+                  {value.x * halfAxes.x, value.y * halfAxes.y, value.z * halfAxes.z});
+  };
+
+  for (int z = firstZ; z <= lastZ; ++z) {
+    for (int x = firstX; x <= lastX; ++x) {
+      const auto& triangles =
+          collision.cellTriangles[static_cast<std::size_t>(z * collision.gridWidth + x)];
+      for (const std::uint32_t triangleIndex : triangles) {
+        const std::size_t first = static_cast<std::size_t>(triangleIndex) * 3U;
+        if (first + 2U >= collision.indices.size()) {
+          continue;
+        }
+        const std::uint32_t indexA = collision.indices[first];
+        const std::uint32_t indexB = collision.indices[first + 1U];
+        const std::uint32_t indexC = collision.indices[first + 2U];
+        if (indexA >= collision.positions.size() || indexB >= collision.positions.size() ||
+            indexC >= collision.positions.size()) {
+          continue;
+        }
+        const gbx::Float3 a = toUnit(collision.positions[indexA]);
+        const gbx::Float3 b = toUnit(collision.positions[indexB]);
+        const gbx::Float3 c = toUnit(collision.positions[indexC]);
+        const gbx::Float3 faceCross = cross(subtract(b, a), subtract(c, a));
+        const float faceSquared = lengthSquared(faceCross);
+        if (faceSquared <= 1.0e-10F) {
+          continue;
+        }
+        const gbx::Float3 face = multiply(faceCross, 1.0F / std::sqrt(faceSquared));
+        const float planeDistance = dot(multiply(a, -1.0F), face);
+        if (planeDistance < 0.0F || planeDistance > 1.0F) {
+          continue;
+        }
+        TriangleFeature feature = TriangleFeature::Face;
+        const gbx::Float3 closest =
+            closestPointOnTriangle({0.0F, 0.0F, 0.0F}, a, b, c, &feature);
+        const float distanceSquared = lengthSquared(closest);
+        const float minimumDistanceSquared =
+            feature == TriangleFeature::Edge ? 1.0e-5F : 1.0e-10F;
+        if ((feature == TriangleFeature::Face && planeDistance <= 0.0F) ||
+            distanceSquared <= minimumDistanceSquared || distanceSquared > 1.0F) {
+          continue;
+        }
+        const float distance = std::sqrt(distanceSquared);
+        const gbx::Float3 unitNormal = multiply(closest, -1.0F / distance);
+        const gbx::Float3 radialCorrection = multiply(unitNormal, distance - 1.0F);
+        const gbx::Float3 rawCorrection =
+            multiply(face, dot(radialCorrection, face));
+        const gbx::Float3 correction = multiply(fromUnitVector(rawCorrection), -1.0F);
+        const gbx::Float3 point = add(center, fromUnitVector(closest));
+        const gbx::Float3 normal = normalize(rotate(
+            localToWorld, {unitNormal.x / halfAxes.x, unitNormal.y / halfAxes.y,
+                           unitNormal.z / halfAxes.z}));
+        handler(TrackEllipsoidContact{
+            correction,
+            normal,
+            point,
+            0.0F,
+            triangleIndex < collision.triangleSurfaceIds.size()
+                ? collision.triangleSurfaceIds[triangleIndex]
+                : static_cast<std::int16_t>(-1),
+            triangleIndex});
+      }
+    }
+  }
+}
+
+std::optional<TrackEllipsoidContact> sampleTrackEllipsoidContact(
+    const TrackCollision& collision, const gbx::Float3 center, const gbx::Float3 halfAxes,
+    const std::array<float, 9>& localToWorld, gbx::Float3 selectionAxis) noexcept {
+  if (!std::isfinite(selectionAxis.x) || !std::isfinite(selectionAxis.y) ||
+      !std::isfinite(selectionAxis.z) || lengthSquared(selectionAxis) <= 1.0e-10F) {
+    return std::nullopt;
+  }
+  selectionAxis = normalize(selectionAxis);
+  std::optional<TrackEllipsoidContact> best;
+  forEachTrackEllipsoidContact(
+      collision, center, halfAxes, localToWorld, [&](TrackEllipsoidContact contact) {
+        contact.axisCorrection = dot(contact.correction, selectionAxis);
+        if (contact.axisCorrection >= 0.0F &&
+            (!best.has_value() || contact.axisCorrection > best->axisCorrection)) {
+          best = contact;
+        }
+      });
+  return best;
+}
+
+void appendTrackEllipsoidContacts(const TrackCollision& collision, const gbx::Float3 center,
+                                  const gbx::Float3 halfAxes,
+                                  const std::array<float, 9>& localToWorld,
+                                  std::vector<TrackEllipsoidContact>& contacts) {
+  const std::size_t firstContact = contacts.size();
+  forEachTrackEllipsoidContact(
+      collision, center, halfAxes, localToWorld, [&](const TrackEllipsoidContact contact) {
+        const bool duplicate = std::ranges::any_of(
+            contacts.begin() + static_cast<std::ptrdiff_t>(firstContact), contacts.end(),
+            [&](const TrackEllipsoidContact& existing) {
+              return existing.triangleIndex == contact.triangleIndex;
+            });
+        if (!duplicate) {
+          contacts.push_back(contact);
+        }
+      });
 }
 
 bool segmentIntersectsTrackTrigger(const TrackTriggerMesh& trigger, const gbx::Float3 from,

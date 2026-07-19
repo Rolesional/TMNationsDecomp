@@ -1,0 +1,10 @@
+targetAddress,fromAddress,functionAddress,functionName,referenceType,instruction
+"00cffc44","008c6e58","008c6e50","FUN_008c6e50","DATA","MOV dword ptr [ESI],0xcffc44"
+"00cffc44","008c6e70","008c6e70","FUN_008c6e70","DATA","MOV dword ptr [ECX],0xcffc44"
+"00d378b0","00b0859b","00b08580","FUN_00b08580","DATA","MOV dword ptr [ESP + 0x18],0xd378b0"
+"00e7e128","00db28d8","","","DATA",""
+"00e7e128","00db28fc","","","DATA",""
+"00ea425c","00dbd6ac","","","DATA",""
+"00ea425c","00dbd6d4","","","DATA",""
+"008c6e90","00cffc44","","","DATA",""
+"00b083f0","00d378b0","","","DATA",""

@@ -1,0 +1,6 @@
+00401650  CMP dword ptr [ECX],0x0
+00401653  JBE 0x00401661
+00401655  MOV EAX,dword ptr [ECX + 0x4]
+00401658  MOV dword ptr [ECX],0x0
+0040165e  MOV byte ptr [EAX],0x0
+00401661  RET

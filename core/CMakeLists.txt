@@ -13,8 +13,12 @@ add_library(tmnf_core STATIC
     src/gbx/body.cpp
     src/gbx/document.cpp
     src/gbx/header.cpp
+    src/gbx/sound_engine.cpp
     src/gbx/solid.cpp
     src/gbx/span_input.cpp
+    src/gbx/vehicle_tunings.cpp
+    src/gameplay/race_start.cpp
+    src/gameplay/race3_camera.cpp
     src/gameplay/vehicle.cpp
     src/image/dds.cpp
     src/image/tga.cpp

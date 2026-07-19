@@ -1,0 +1,4 @@
+vftable=GmSurfEllipsoid::vftable
+address=00cffc44
+00 +0x00 008c6e90 FUN_008c6e90
+entries=1

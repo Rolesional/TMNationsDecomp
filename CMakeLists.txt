@@ -97,6 +97,15 @@ target_link_libraries(track_collision_test PRIVATE tmnf_core)
 add_executable(vehicle_simulation_test tests/vehicle_simulation_test.cpp)
 target_link_libraries(vehicle_simulation_test PRIVATE tmnf_core)
 
+add_executable(race_start_test tests/race_start_test.cpp)
+target_link_libraries(race_start_test PRIVATE tmnf_core)
+
+add_executable(race3_camera_test tests/race3_camera_test.cpp)
+target_link_libraries(race3_camera_test PRIVATE tmnf_core)
+
+add_executable(legacy_string_view_test tests/legacy_string_view_test.cpp)
+target_link_libraries(legacy_string_view_test PRIVATE tmnf_core)
+
 enable_testing()
 add_test(NAME gbx_header_fixture COMMAND gbx_header_test)
 add_test(NAME pak_header_fixture COMMAND pak_header_test)
@@ -112,3 +121,6 @@ add_test(NAME block_info COMMAND block_info_test)
 add_test(NAME block_assets COMMAND block_assets_test)
 add_test(NAME track_collision COMMAND track_collision_test)
 add_test(NAME vehicle_simulation COMMAND vehicle_simulation_test)
+add_test(NAME race_start COMMAND race_start_test)
+add_test(NAME race3_camera COMMAND race3_camera_test)
+add_test(NAME legacy_string_view COMMAND legacy_string_view_test)

@@ -14,13 +14,27 @@ $referenceRoot = Join-Path $WorkspaceRoot 'TmNationsForever'
 $gameDataRoot = Join-Path $referenceRoot 'GameData'
 
 $audioTest = Join-Path $WorkspaceRoot 'build\host\audio_ring_buffer_test.exe'
-$checkpointSound = Join-Path $gameDataRoot 'Interface\Media\Audio\Sound\Wav\RaceCheckPoint.wav'
-$finishSound = Join-Path $gameDataRoot 'Interface\Media\Audio\Sound\Wav\RaceFinish.wav'
-& $audioTest $checkpointSound $finishSound
+$raceSounds = @(
+    'RaceCheckPoint.wav',
+    'RaceFinish.wav',
+    'Race1.wav',
+    'Race2.wav',
+    'Race3.wav',
+    'RaceGo.wav'
+) | ForEach-Object { Join-Path $gameDataRoot "Interface\Media\Audio\Sound\Wav\$_" }
+$engineSounds = @(
+    'SportCarEngineIdle.wav',
+    'SportCarEngineLow.wav',
+    'SportCarEngineMid.wav',
+    'SportCarEngineFast.wav',
+    'SportCarEngineRev.wav',
+    'SportCarEngineRev2.wav'
+) | ForEach-Object { Join-Path $gameDataRoot "Vehicles\Media\Audio\Sound\WavData\$_" }
+& $audioTest @raceSounds @engineSounds
 if ($LASTEXITCODE -ne 0) {
-    throw 'Original checkpoint/finish PCM16 WAV decode failed'
+    throw 'Original race-event or engine PCM16 WAV decode failed'
 }
-Write-Output 'Original race-event WAV decode: 2/2 passed at 48 kHz stereo output'
+Write-Output 'Original race-event/engine WAV decode: 12/12 passed at 48 kHz stereo output'
 
 $files = @(Get-ChildItem -LiteralPath $referenceRoot -Recurse -File |
     Where-Object Extension -IEq '.gbx')
@@ -369,6 +383,33 @@ for ($index = 0; $index -lt $positionHashes.Count; $index++) {
 }
 Write-Output 'NadeoPak logical-path solid graph: 1/1 passed'
 
+$treeTransformCases = @(
+    @('Media\Solid\Platform\ToRoad\ToRoadMainAir.Solid.Gbx', 0.0, 32.0, 0.0, 32.0, 0.0, 32.0, 0.0, 32.0),
+    @('Media\Solid\Platform\Checkpoint\Air.Solid.Gbx', -0.787712, 32.7877, 0.0, 32.0, -0.0115891, 32.0116, 0.0, 32.0),
+    @('Media\Solid\Circuit\Slope\Start\BaseAir.Solid.Gbx', 0.0, 32.0, 0.0, 32.0, 0.0, 32.0, 0.0, 32.0),
+    @('Media\Solid\Circuit\Slope\Straight\BaseAir.Solid.Gbx', 0.0, 32.0, 0.0, 32.0, 0.0, 32.0, 0.0, 32.0),
+    @('Media\Solid\Circuit\Slope\End\BaseAir.Solid.Gbx', 0.0, 32.0, 0.0, 32.0, 0.0, 32.0, 0.0, 32.0)
+)
+foreach ($case in $treeTransformCases) {
+    $output = @(& $solidTool $stadiumPak $packListPath $case[0] 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "A01 transformed solid failed to parse: $($case[0])`n$($output -join "`n")"
+    }
+    $transformed = ($output -join "`n") | ConvertFrom-Json
+    $actual = @(
+        $transformed.bounds.minimum[0], $transformed.bounds.maximum[0],
+        $transformed.bounds.minimum[2], $transformed.bounds.maximum[2],
+        $transformed.collisionBounds.minimum[0], $transformed.collisionBounds.maximum[0],
+        $transformed.collisionBounds.minimum[2], $transformed.collisionBounds.maximum[2]
+    )
+    for ($index = 0; $index -lt $actual.Count; $index++) {
+        if ([Math]::Abs($actual[$index] - $case[$index + 1]) -gt 0.001) {
+            throw "A01 ancestor tree transform mismatch for $($case[0]) at bound $index"
+        }
+    }
+}
+Write-Output 'A01 ancestor tree transforms: 5/5 visual and collision bounds normalized'
+
 $materialTool = Join-Path $WorkspaceRoot 'build\host\archive_material_probe.exe'
 $materialOutput = @(& $materialTool $stadiumPak $packListPath 'Media\Solid\Tube\Road\BaseGround.Solid.Gbx' $gameDataRoot 2>&1)
 if ($LASTEXITCODE -ne 0) {
@@ -431,6 +472,40 @@ if ($vehicleLowLod.Count -ne 7 -or
     throw 'StadiumCar low-LOD selection did not match'
 }
 Write-Output 'Packed StadiumCar low-LOD selection: 7/87 visuals enabled for vehicle rendering'
+$wheelApplicationPoints = @{
+    FLSurf = @(0.863012, 0.3525, 1.78209)
+    FRSurf = @(-0.86299, 0.3525, 1.78209)
+    RRSurf = @(-0.885, 0.352504, -1.2055)
+    RLSurf = @(0.885002, 0.352504, -1.2055)
+}
+foreach ($entry in $wheelApplicationPoints.GetEnumerator()) {
+    $node = @($vehicleSolid.treeTransforms | Where-Object name -CEQ $entry.Key)
+    if ($node.Count -ne 1) {
+        throw "StadiumCar wheel application node $($entry.Key) did not resolve exactly once"
+    }
+    for ($component = 0; $component -lt 9; ++$component) {
+        $expected = if ($component -in 0, 4, 8) { 1.0 } else { 0.0 }
+        if ([Math]::Abs($node[0].transform[$component] - $expected) -gt 0.00001) {
+            throw "StadiumCar wheel application node $($entry.Key) rotation did not match"
+        }
+    }
+    for ($component = 0; $component -lt 3; ++$component) {
+        if ([Math]::Abs($node[0].transform[$component + 9] - $entry.Value[$component]) -gt 0.00001) {
+            throw "StadiumCar wheel application node $($entry.Key) point did not match"
+        }
+    }
+    $shape = @($vehicleSolid.collisionShapes | Where-Object treeName -CEQ $entry.Key)
+    if ($shape.Count -ne 1 -or $shape[0].type -CNE 'ellipsoid' -or
+        [Math]::Abs($shape[0].minimum[0] + 0.182) -gt 0.00001 -or
+        [Math]::Abs($shape[0].minimum[1] + 0.364) -gt 0.00001 -or
+        [Math]::Abs($shape[0].minimum[2] + 0.364) -gt 0.00001 -or
+        [Math]::Abs($shape[0].maximum[0] - 0.182) -gt 0.00001 -or
+        [Math]::Abs($shape[0].maximum[1] - 0.364) -gt 0.00001 -or
+        [Math]::Abs($shape[0].maximum[2] - 0.364) -gt 0.00001) {
+        throw "StadiumCar wheel collision shape $($entry.Key) did not match"
+    }
+}
+Write-Output 'StadiumCar wheels: 4/4 composed Surf force points and ellipsoids matched'
 
 $blockAssetsTool = Join-Path $WorkspaceRoot 'build\host\archive_block_assets.exe'
 $blockAssetsOutput = @(& $blockAssetsTool $stadiumPak $packListPath $a01Path 2>&1)
@@ -457,6 +532,8 @@ $finishMetadata = @($waypointMetadata | Where-Object name -CEQ 'StadiumRoadMainF
 $checkpointMetadata = @($waypointMetadata | Where-Object { $_.metadata.waypoint -eq 'checkpoint' })
 $ringCheckpointMetadata = @($checkpointMetadata | Where-Object name -CEQ 'StadiumCheckpointRingV')
 $platformCheckpointMetadata = @($checkpointMetadata | Where-Object name -CEQ 'StadiumPlatformCheckpoint')
+$gtCurveFootprint = @($blockAssets.blocks | Where-Object name -CEQ 'StadiumCircuitBorderGTCurve2In')
+$toRoadFootprint = @($blockAssets.blocks | Where-Object name -CEQ 'StadiumPlatformToRoadMain')
 if ($startMetadata.Count -ne 1 -or $startMetadata[0].metadata.waypoint -ne 'start' -or
     [Math]::Abs($startMetadata[0].metadata.spawnAir[9] - 16.0) -gt 0.00001 -or
     [Math]::Abs($startMetadata[0].metadata.spawnAir[10] - 2.21) -gt 0.00001 -or
@@ -464,7 +541,9 @@ if ($startMetadata.Count -ne 1 -or $startMetadata[0].metadata.waypoint -ne 'star
     $finishMetadata.Count -ne 1 -or $finishMetadata[0].metadata.waypoint -ne 'finish' -or
     $checkpointMetadata.Count -ne 2 -or
     $ringCheckpointMetadata.Count -ne 1 -or $ringCheckpointMetadata[0].metadata.noRespawn -ne $true -or
-    $platformCheckpointMetadata.Count -ne 1 -or $platformCheckpointMetadata[0].metadata.noRespawn -ne $false) {
+    $platformCheckpointMetadata.Count -ne 1 -or $platformCheckpointMetadata[0].metadata.noRespawn -ne $false -or
+    $gtCurveFootprint.Count -ne 1 -or ($gtCurveFootprint[0].airFootprint -join ',') -ne '2,2' -or
+    $toRoadFootprint.Count -ne 1 -or ($toRoadFootprint[0].airFootprint -join ',') -ne '1,1') {
     throw 'A01 BlockInfo waypoint/spawn metadata did not match'
 }
 Write-Output 'A01 construction asset graphs: 32/32 resolved (81 visible solid references, 4 waypoint metadata records)'
@@ -485,11 +564,65 @@ if ($null -eq $fabricAliasGraph -or
 Write-Output 'Packed fabric identity alias: StadiumFabricPillarCornerOut resolved'
 
 $trackSceneTool = Join-Path $WorkspaceRoot 'build\host\archive_track_scene.exe'
-$trackSceneOutput = @(& $trackSceneTool $stadiumPak $packListPath $a01Path $gameDataRoot 2>&1)
+$a01GroundQueries = @(
+    194.09119, 89.358284, 689.6018,
+    220.84866, 88.02442, 696.987,
+    975.1122, 24.013105, 310.16437,
+    971.8925, 24.024632, 298.13672,
+    958.2894, 24.06828, 263.10492,
+    952.08325, 24.056562, 252.10118,
+    945.00714, 24.04981, 241.58334,
+    937.0851, 24.054468, 231.6317,
+    620.3471, 26.786789, 173.39099,
+    559.74493, 56.200424, 174.508,
+    536.339, 67.86969, 174.91403,
+    524.7381, 73.672455, 175.08028
+)
+$a01SceneQueries = @($a01GroundQueries) + @(
+    '--trigger',
+    27.559633, 113.9084, 181.13004,
+    17.136797, 114.1994, 180.86806
+)
+$trackSceneOutput = @(& $trackSceneTool $stadiumPak $packListPath $a01Path $gameDataRoot @a01SceneQueries 2>&1)
 if ($LASTEXITCODE -ne 0) {
     throw "A01 portable track scene failed to build:`n$($trackSceneOutput -join "`n")"
 }
 $trackScene = ($trackSceneOutput -join "`n") | ConvertFrom-Json
+$maxSideFriction = @($trackScene.vehicleTuning.maxSideFriction)
+$wheelCompression = @($trackScene.vehicleTuning.modulationFromWheelCompression)
+$steerDriveTorque = @($trackScene.vehicleTuning.steerDriveTorque)
+$steerSlowDown = @($trackScene.vehicleTuning.steerSlowDown)
+$visualSteerAngle = @($trackScene.vehicleTuning.visualSteerAngleFromSpeed)
+$airControlZ = @($trackScene.vehicleTuning.airControlZCoefFromAngularSpeed)
+$collisionSurfaceCounts = @($trackScene.collisionSurfaceTriangleCounts)
+$m6RolloverLateral = @($trackScene.vehicleTuning.m6RolloverLateralFromSpeedRatio)
+$m6BurnoutRollover = @($trackScene.vehicleTuning.m6BurnoutRolloverFromSpeed)
+$m6DonutRollover = @($trackScene.vehicleTuning.m6DonutRolloverFromSpeed)
+$expectedBodyShapes = @{
+    BodySurf = @(0.439118, 0.362, 1.90153, 1, 0, 0, 0, 0.998223, -0.059586, 0, 0.059586, 0.998223, 0, 0.471253, 0.219106)
+    BodySurf01 = @(0.968297, 0.362741, 1.68228, 1, 0, 0, 0, 0.998954, -0.045716, 0, 0.045716, 0.998954, 0, 0.448782, -0.20792)
+    BodySurf02 = @(1.02092, 0.515218, 1.03801, 1, 0, 0, 0, 0.9989, -0.046888, 0, 0.046888, 0.9989, 0, 0.652812, -0.89763)
+    BodySurf04 = @(0.384841, 0.905323, 0.283418, 0, -1, 0, 0, 0, -1, 1, 0, 0, -0.015532, 0.363252, 1.75357)
+}
+$bodyShapes = @($trackScene.vehicleCollisionShapes | Where-Object name -CLike 'BodySurf*')
+if (@($trackScene.vehicleCollisionShapes).Count -ne 8 -or $bodyShapes.Count -ne 4) {
+    throw 'StadiumCar collision ellipsoid count did not match'
+}
+foreach ($entry in $expectedBodyShapes.GetEnumerator()) {
+    $shape = @($bodyShapes | Where-Object name -CEQ $entry.Key)
+    if ($shape.Count -ne 1 -or $shape[0].surfaceId -ne 0) {
+        throw "StadiumCar $($entry.Key) identity/surface did not match"
+    }
+    $actual = @($shape[0].halfAxes) + @($shape[0].transform)
+    if ($actual.Count -ne $entry.Value.Count) {
+        throw "StadiumCar $($entry.Key) collision field count did not match"
+    }
+    for ($index = 0; $index -lt $actual.Count; ++$index) {
+        if ([Math]::Abs($actual[$index] - $entry.Value[$index]) -gt 0.00001) {
+            throw "StadiumCar $($entry.Key) collision field $index did not match"
+        }
+    }
+}
 if ($trackScene.challengeBlockCount -ne 397 -or $trackScene.placementCount -ne 373 -or
     $trackScene.invisibleBlockCount -ne 24 -or $trackScene.modelCount -ne 33 -or
     $trackScene.textureCount -ne 33 -or $trackScene.uniqueEnabledVisualCount -ne 262 -or
@@ -497,18 +630,198 @@ if ($trackScene.challengeBlockCount -ne 397 -or $trackScene.placementCount -ne 3
     $trackScene.instancedVertexCount -ne 264735 -or
     $trackScene.instancedIndexCount -ne 635640 -or
     $trackScene.collisionVertexCount -ne 98189 -or
-    $trackScene.collisionIndexCount -ne 529392 -or
+    $trackScene.collisionIndexCount -ne 528984 -or
+    $collisionSurfaceCounts.Count -ne 31 -or
+    ($collisionSurfaceCounts -join ',') -CNE '11796,0,528,684,65862,0,0,0,0,71232,276,0,0,0,0,0,25906,0,0,0,0,0,44,0,0,0,0,0,0,0,0' -or
     $trackScene.triggerCount -ne 3 -or $trackScene.triggerVertexCount -ne 72 -or
     $trackScene.triggerIndexCount -ne 396 -or
     $trackScene.orderedCheckpointCount -ne 2 -or
+    $trackScene.vehicleTuning.count -ne 30 -or
+    $trackScene.vehicleTuning.activeIndex -ne 29 -or
+    $trackScene.vehicleTuning.name -CNE '20juin2006' -or
+    -not $trackScene.vehicleTuning.fakeEngine -or
+    [Math]::Abs($trackScene.vehicleTuning.mass - 1.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.maxSpeed - 277.7778) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.reverseMaxSpeed - 138.61111) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.turboBoost - 5.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.turbo2Boost - 20.0) -gt 0.001 -or
+    $trackScene.vehicleTuning.turboDuration -ne 250 -or
+    $trackScene.vehicleTuning.turbo2Duration -ne 100 -or
+    [Math]::Abs($trackScene.vehicleTuning.steerSpeed - 20.0) -gt 0.001 -or
+    $trackScene.vehicleTuning.steerModel -ne 5 -or
+    [Math]::Abs($trackScene.vehicleTuning.steerGroundTorque - 0.08) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.suspensionSpring - 40.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.suspensionDamping - 1.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.suspensionMinimum) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.suspensionMaximum - 0.7) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.suspensionRest - 0.2) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.relativeSpeedMultiplier - 0.2) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.absorbTension - 5.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.centerOfMassAftForce) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.centerOfMassDownUp - 0.45) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.inertiaMass - 5.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.inertiaHalfDiagonal[0] - 0.5) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.inertiaHalfDiagonal[1] - 0.5) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.inertiaHalfDiagonal[2] - 1.0) -gt 0.001 -or
+    $trackScene.vehicleTuning.tireMaterial -ne 9 -or
+    $trackScene.vehicleTuning.shockModel -ne 2 -or
+    [Math]::Abs($trackScene.vehicleTuning.gravityCoef - 3.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.gravityCoefAir - 2.5) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.angularFluidFrictionCoef1 - 0.4) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.angularFluidFrictionCoef2 - 0.2) -gt 0.001 -or
+    $trackScene.vehicleTuning.airControlDuration -ne 30000 -or
+    [Math]::Abs($trackScene.vehicleTuning.maxAngularSpeedYAirControl - 3.14) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.bodyFrictionCoefConcrete - 0.3) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.bodyFrictionCoefMetal - 0.2) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.bodyRestCoefMetal + 0.5) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.bodyRestCoefConcrete + 0.5) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.wheelFrictionCoefConcrete) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.wheelRestCoefConcrete + 0.8) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.wheelFrictionCoefMetal) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.wheelRestCoefMetal + 0.8) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.angularSpeedYImpulseScale - 0.55) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.angularSpeedClamp - 100.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.linearSpeed2PositiveDeltaMax - 10000.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.steerLowSpeed - 30.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.lateralSlopeAdherenceMin - 0.3) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.lateralSlopeAdherenceMax - 0.7) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.axialSlopeAdherenceMin - 0.4) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.axialSlopeAdherenceMax - 0.7) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.steerGroundTorqueSlippingCoef - 1.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.sideFriction1 - 40.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.maxSideFrictionBlendCoef - 0.018) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.maxSideFrictionSliding - 0.35) -gt 0.001 -or
+    $maxSideFriction.Count -ne 1 -or @($maxSideFriction[0].x).Count -ne 6 -or
+    ($maxSideFriction[0].x -join ',') -CNE '0,100,200,300,400,500' -or
+    ($maxSideFriction[0].y -join ',') -CNE '80,80,75,67,60,55' -or
+    $steerDriveTorque.Count -ne 1 -or @($steerDriveTorque[0].x).Count -ne 10 -or
+    ($steerDriveTorque[0].x -join ',') -CNE '-100,0,50,100,150,200,300,400,500,600' -or
+    ($steerDriveTorque[0].y -join ',') -CNE '7,16,10.4,8.5,6.8,5.5,4.25,4,3.75,3.75' -or
+    $steerSlowDown.Count -ne 1 -or @($steerSlowDown[0].x).Count -ne 6 -or
+    ($steerSlowDown[0].x -join ',') -CNE '-50,0,50,100,200,300' -or
+    ($steerSlowDown[0].y -join ',') -CNE '1,0,0,0,0,0' -or
+    [Math]::Abs($trackScene.vehicleTuning.steerSlowDownCoef - 0.5) -gt 0.001 -or
+    $visualSteerAngle.Count -ne 1 -or @($visualSteerAngle[0].x).Count -ne 2 -or
+    ($visualSteerAngle[0].x -join ',') -CNE '0,100' -or
+    ($visualSteerAngle[0].y -join ',') -CNE '30,10' -or
+    $airControlZ.Count -ne 1 -or ($airControlZ[0].x -join ',') -CNE '0' -or
+    ($airControlZ[0].y -join ',') -CNE '1' -or
+    $wheelCompression.Count -ne 1 -or @($wheelCompression[0].x).Count -ne 4 -or
+    ($wheelCompression[0].x -join ',') -CNE '0,0.6,0.975,1' -or
+    ($wheelCompression[0].y -join ',') -CNE '0.1,0.3,1,1' -or
+    [Math]::Abs($trackScene.vehicleTuning.frictionModulationWhenSlipAndBrake - 0.2) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.m6InertialMass - 5.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.m6ForceEpsilon - 0.01) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.m6InertialTorqueModulationX - 0.05) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.m6InertialTorqueModulationZ - 0.05) -gt 0.001 -or
+    $m6RolloverLateral.Count -ne 1 -or @($m6RolloverLateral[0].x).Count -ne 5 -or
+    ($m6RolloverLateral[0].x -join ',') -CNE '0,1,10,20,30' -or
+    ($m6RolloverLateral[0].y -join ',') -CNE '0,0.8,1,1,1' -or
+    $m6BurnoutRollover.Count -ne 1 -or @($m6BurnoutRollover[0].x).Count -ne 3 -or
+    ($m6BurnoutRollover[0].x -join ',') -CNE '0,10,50' -or
+    ($m6BurnoutRollover[0].y -join ',') -CNE '1.5,1.2,0.2' -or
+    $m6DonutRollover.Count -ne 1 -or @($m6DonutRollover[0].x).Count -ne 3 -or
+    ($m6DonutRollover[0].x -join ',') -CNE '0,10,20' -or
+    ($m6DonutRollover[0].y -join ',') -CNE '0,5,6' -or
+    [Math]::Abs($trackScene.vehicleTuning.m6MaxRpm - 11000.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.burnoutRpmAcceleration - 6000.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.airRpmAcceleration - 6000.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.airRpmDeadening - 3000.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.rpmLossOnGearUp - 17000.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.rpmGainOnGearDown - 11500.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.speedLimitPositiveForTakeOffFront - 3.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.speedLimitPositiveForTakeOffRear - 2.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.speedLimitNegativeForTakeOffFront + 2.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.speedLimitNegativeForTakeOffRear + 3.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.rpmGainOnTakeOff - 10000.0) -gt 0.001 -or
+    [Math]::Abs($trackScene.vehicleTuning.rpmLossOnTakeOffFinished - 4000.0) -gt 0.001 -or
     $trackScene.vehicleCheckpointCount -ne 2 -or
-    $trackScene.occupiedCollisionCellCount -ne 364 -or
+    $trackScene.occupiedCollisionCellCount -ne 359 -or
     [Math]::Abs($trackScene.vehicleSpawn.x - 171.2) -gt 0.0001 -or
     [Math]::Abs($trackScene.vehicleSpawn.y - 90.21) -gt 0.0001 -or
     [Math]::Abs($trackScene.vehicleSpawn.z - 688.0) -gt 0.0001 -or
-    [Math]::Abs($trackScene.vehicleSpawn.heading - 1.5708) -gt 0.0001) {
+    [Math]::Abs($trackScene.vehicleSpawn.heading - 1.5708) -gt 0.0001 -or
+    $trackScene.startGround.surfaceId -ne 16 -or
+    $trackScene.startGroundSamples.positiveX -ne 16 -or
+    $trackScene.groundQueries.count -ne 12 -or $trackScene.groundQueries.hits -ne 12 -or
+    $null -ne $trackScene.groundQueries.firstMismatch -or
+    $trackScene.triggerQueries.count -ne 1 -or $trackScene.triggerQueries.hits -ne 1) {
     throw 'A01 portable track scene regression did not match'
 }
+$soundFields = @(
+    'minVolume', 'maxVolume', 'fadeInStartRpm', 'fadeInEndRpm', 'fadeOutStartRpm',
+    'fadeOutEndRpm', 'minPitch', 'maxPitch', 'pitchShiftStartRpm', 'pitchShiftEndRpm'
+)
+$expectedSoundComponents = @(
+    @('WavData\SportCarEngineIdle.wav', 0, .81, 0, 0, 600, 4000, .5, 1.4, 600, 3000),
+    @('WavData\SportCarEngineLow.wav', 0, .5, 335, 600, 5000, 8000, .3, 1.2, 500, 6000),
+    @('WavData\SportCarEngineMid.wav', 0, .65, 3500, 6000, 7000, 13000, .9, 1.7, 4000, 9000),
+    @('WavData\SportCarEngineFast.wav', 0, .81, 5000, 9000, 9000, 14000, 1.1, 1.8, 3000, 11000),
+    @('WavData\SportCarEngineRev.wav', 0, .81, -335, -600, -8000, -17000, .3, .6, -500, -12000),
+    @('WavData\SportCarEngineRev2.wav', 0, .5, -4000, -6000, -9000, -14000, 1.5, 2.6, -4000, -14000)
+)
+if ([Math]::Abs($trackScene.soundEngine.volume - .55) -gt 0.0001 -or
+    [Math]::Abs($trackScene.soundEngine.maxRpm - 11000.0) -gt 0.001 -or
+    @($trackScene.soundEngine.components).Count -ne $expectedSoundComponents.Count) {
+    throw 'Stadium sound-engine root did not match'
+}
+for ($componentIndex = 0; $componentIndex -lt $expectedSoundComponents.Count; ++$componentIndex) {
+    $actual = $trackScene.soundEngine.components[$componentIndex]
+    $expected = $expectedSoundComponents[$componentIndex]
+    if ($actual.path -CNE $expected[0]) {
+        throw "Stadium sound-engine component $componentIndex path did not match"
+    }
+    for ($fieldIndex = 0; $fieldIndex -lt $soundFields.Count; ++$fieldIndex) {
+        if ([Math]::Abs($actual.($soundFields[$fieldIndex]) - $expected[$fieldIndex + 1]) -gt 0.0001) {
+            throw "Stadium sound-engine component $componentIndex $($soundFields[$fieldIndex]) did not match"
+        }
+    }
+}
+$expectedSoundCurves = @(
+    @(@(0, 100, 250), @(.7, .7, 1)),
+    @(@(0, 50, 250), @(1, 1, 1)),
+    @(@(0, 9000, 11000), @(1, 1, .8)),
+    @(@(0, .1, 1), @(.7, .7, 1)),
+    @(@(0, 100, 500), @(0, 0, 0)),
+    @(@(0, 50, 250), @(0, 0, 0)),
+    @(@(900, 7000, 30000), @(0, 0, 0)),
+    @(@(0, 1, 10), @(0, 0, 0))
+)
+$actualSoundCurves = @($trackScene.soundEngine.volumeCurves) + @($trackScene.soundEngine.alphaCurves)
+for ($curveIndex = 0; $curveIndex -lt $expectedSoundCurves.Count; ++$curveIndex) {
+    foreach ($axis in @('x', 'y')) {
+        $axisIndex = if ($axis -eq 'x') { 0 } else { 1 }
+        $actual = @($actualSoundCurves[$curveIndex].$axis)
+        $expected = @($expectedSoundCurves[$curveIndex][$axisIndex])
+        if ($actual.Count -ne $expected.Count) {
+            throw "Stadium sound-engine curve $curveIndex $axis length did not match"
+        }
+        for ($valueIndex = 0; $valueIndex -lt $actual.Count; ++$valueIndex) {
+            if ([Math]::Abs($actual[$valueIndex] - $expected[$valueIndex]) -gt 0.0001) {
+                throw "Stadium sound-engine curve $curveIndex $axis[$valueIndex] did not match"
+            }
+        }
+    }
+}
+Write-Output 'Stadium engine graph: 6/6 signed-RPM components and 8/8 root curves matched'
+$expectedTuningArrays = @{
+    gearRatio = @(400.0, 370.0, 220.0, 160.0, 110.0, 85.0)
+    maxRpmByGear = @(0.0, 0.95, 0.9, 0.95, 0.95, 1.0)
+    minRpmByGear = @(0.0, 0.0, 0.5, 0.57, 0.55, 0.6)
+    rpmWantedOnGearUp = @(0.0, 0.0, 0.628, 0.7, 0.7, 0.72)
+}
+foreach ($entry in $expectedTuningArrays.GetEnumerator()) {
+    $actual = @($trackScene.vehicleTuning.($entry.Key))
+    if ($actual.Count -ne $entry.Value.Count) {
+        throw "Active Stadium vehicle tuning $($entry.Key) length did not match"
+    }
+    for ($index = 0; $index -lt $actual.Count; ++$index) {
+        if ([Math]::Abs($actual[$index] - $entry.Value[$index]) -gt 0.0001) {
+            throw "Active Stadium vehicle tuning $($entry.Key)[$index] did not match"
+        }
+    }
+}
+Write-Output 'Active Stadium vehicle tuning: 30 entries, suspension/inertia/material/drivetrain matched'
 $expectedTopologyPlacements = @{
     'Stadium\Media\Solid\Control\RoadGlass\DeadendAir.Solid.Gbx' = 14
     'Stadium\Media\Solid\Control\RoadGlass\CornerAir.Solid.Gbx' = 4
@@ -522,7 +835,7 @@ foreach ($entry in $expectedTopologyPlacements.GetEnumerator()) {
         throw "A01 topology variant mismatch for $($entry.Key)"
     }
 }
-Write-Output 'A01 portable scene: 373 placements, 33 models, 33 textures, 635640 render indices, 529392 collision indices'
+Write-Output 'A01 portable scene: 373 placements, 33 models, 33 textures, 635640 render indices, 528984 collision indices'
 
 $c11Path = Join-Path $gameDataRoot 'Tracks\Campaigns\Nations\Blue\C11-Race.Challenge.Gbx'
 $c11SceneOutput = @(& $trackSceneTool $stadiumPak $packListPath $c11Path $gameDataRoot 2>&1)

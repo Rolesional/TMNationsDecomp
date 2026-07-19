@@ -4,7 +4,9 @@
 #include <android/log.h>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
+#include <cstdint>
 #include <span>
 #include <utility>
 #include <vector>
@@ -14,6 +16,20 @@ namespace {
 
 constexpr char kLogTag[] = "TMNF";
 constexpr double kTau = 6.28318530717958647692;
+static_assert(std::atomic<std::uint32_t>::is_always_lock_free);
+static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
+
+std::uint64_t packFloats(const float first, const float second) noexcept {
+  return static_cast<std::uint64_t>(std::bit_cast<std::uint32_t>(first)) |
+         (static_cast<std::uint64_t>(std::bit_cast<std::uint32_t>(second)) << 32U);
+}
+
+std::pair<float, float> unpackFloats(const std::uint64_t packed) noexcept {
+  return {
+      std::bit_cast<float>(static_cast<std::uint32_t>(packed)),
+      std::bit_cast<float>(static_cast<std::uint32_t>(packed >> 32U)),
+  };
+}
 
 } // namespace
 
@@ -62,7 +78,8 @@ bool AudioOutput::start() {
   }
   sampleRate_ = AAudioStream_getSampleRate(stream_);
   frames_.clear();
-  decodeSounds();
+  decodeRaceSounds();
+  decodeEngineSounds();
   result = AAudioStream_requestStart(stream_);
   if (result != AAUDIO_OK) {
     __android_log_print(ANDROID_LOG_WARN, kLogTag, "AAudio start failed: %s",
@@ -101,8 +118,37 @@ void AudioOutput::update() {
 void AudioOutput::setSound(const RaceSound sound, std::vector<std::byte> wavBytes) {
   soundBytes_[static_cast<std::size_t>(sound)] = std::move(wavBytes);
   if (stream_ != nullptr) {
-    decodeSounds();
+    decodeRaceSounds();
   }
+}
+
+void AudioOutput::setEngine(tmnf::gbx::SoundEngine engine,
+                            std::vector<std::vector<std::byte>> wavBytes) {
+  if (!engine_.components.empty()) {
+    return;
+  }
+  if (engine.components.empty() || engine.components.size() != wavBytes.size()) {
+    __android_log_print(ANDROID_LOG_WARN, kLogTag, "Engine graph/WAV count mismatch");
+    return;
+  }
+  const bool restart = stream_ != nullptr;
+  if (restart) {
+    stop();
+  }
+  engine_ = std::move(engine);
+  engineSoundBytes_ = std::move(wavBytes);
+  if (restart) {
+    start();
+  }
+}
+
+void AudioOutput::setEngineState(float speedInput, float signedRpm, float acceleration) noexcept {
+  if (!std::isfinite(speedInput)) speedInput = 0.0F;
+  if (!std::isfinite(signedRpm)) signedRpm = 0.0F;
+  if (!std::isfinite(acceleration)) acceleration = 0.0F;
+  engineRpmAcceleration_.store(packFloats(signedRpm, acceleration),
+                               std::memory_order_release);
+  engineSpeedInput_.store(std::bit_cast<std::uint32_t>(speedInput), std::memory_order_release);
 }
 
 void AudioOutput::playSound(const RaceSound sound) {
@@ -115,7 +161,7 @@ void AudioOutput::playSound(const RaceSound sound) {
                       sounds_[index].size());
 }
 
-void AudioOutput::decodeSounds() {
+void AudioOutput::decodeRaceSounds() {
   for (std::size_t index = 0; index < sounds_.size(); ++index) {
     sounds_[index].clear();
     if (soundBytes_[index].empty()) {
@@ -131,6 +177,26 @@ void AudioOutput::decodeSounds() {
     sounds_[index] = std::move(decoded.frames);
     __android_log_print(ANDROID_LOG_INFO, kLogTag, "Race sound %zu ready: %zu frames at %d Hz",
                         index, sounds_[index].size(), sampleRate_);
+  }
+}
+
+void AudioOutput::decodeEngineSounds() {
+  engineSounds_.clear();
+  engineSounds_.resize(engineSoundBytes_.size());
+  engineCursors_.assign(engineSoundBytes_.size(), 0.0);
+  for (std::size_t index = 0; index < engineSoundBytes_.size(); ++index) {
+    tmnf::platform::AudioClipDecodeResult decoded =
+        tmnf::platform::decodePcm16Wav(engineSoundBytes_[index], sampleRate_);
+    if (!decoded) {
+      __android_log_print(ANDROID_LOG_WARN, kLogTag, "Engine sound %zu decode failed: %s", index,
+                          decoded.error.c_str());
+      continue;
+    }
+    engineSounds_[index] = std::move(decoded.frames);
+  }
+  if (!engineSounds_.empty()) {
+    __android_log_print(ANDROID_LOG_INFO, kLogTag, "Engine sound ready: %zu continuous layers",
+                        engineSounds_.size());
   }
 }
 
@@ -179,6 +245,32 @@ aaudio_data_callback_result_t AudioOutput::dataCallback(AAudioStream*, void* con
   const std::size_t read = output.frames_.read(frames);
   std::fill(frames.begin() + static_cast<std::ptrdiff_t>(read), frames.end(),
             tmnf::platform::StereoFrame{});
+  const auto [rpm, acceleration] = unpackFloats(
+      output.engineRpmAcceleration_.load(std::memory_order_acquire));
+  const float speedInput =
+      std::bit_cast<float>(output.engineSpeedInput_.load(std::memory_order_acquire));
+  const float rootVolume = output.engine_.volume *
+                           tmnf::gbx::evaluateSoundEngineVolume(
+                               output.engine_, speedInput, 0.0F, rpm, acceleration);
+  const std::size_t componentCount =
+      std::min({output.engine_.components.size(), output.engineSounds_.size(),
+                output.engineCursors_.size()});
+  for (std::size_t componentIndex = 0; componentIndex < componentCount; ++componentIndex) {
+    const tmnf::gbx::SoundEngineComponentMix mix = tmnf::gbx::evaluateSoundEngineComponent(
+        output.engine_.components[componentIndex], rpm);
+    const float rawGain = rootVolume * mix.volume;
+    const float gain = std::isfinite(rawGain) && rawGain > 0.0F ? rawGain : 0.0F;
+    for (tmnf::platform::StereoFrame& frame : frames) {
+      const tmnf::platform::StereoFrame engineFrame = tmnf::platform::sampleAudioLoop(
+          output.engineSounds_[componentIndex], output.engineCursors_[componentIndex], mix.pitch);
+      frame.left += engineFrame.left * gain;
+      frame.right += engineFrame.right * gain;
+    }
+  }
+  for (tmnf::platform::StereoFrame& frame : frames) {
+    frame.left = std::isfinite(frame.left) ? std::clamp(frame.left, -1.0F, 1.0F) : 0.0F;
+    frame.right = std::isfinite(frame.right) ? std::clamp(frame.right, -1.0F, 1.0F) : 0.0F;
+  }
   return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 

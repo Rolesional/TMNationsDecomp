@@ -58,8 +58,10 @@ constexpr std::array kHudGlyphs{
     HudGlyph{' ', 44.015625F, 254.0F, 62.015625F, 192.0F, 18.0F},
     HudGlyph{'A', 65.015625F, 254.0F, 95.015625F, 192.0F, 30.0F},
     HudGlyph{'C', 131.015625F, 254.0F, 159.015625F, 192.0F, 27.0F},
+    HudGlyph{'G', 259.015625F, 254.0F, 289.015625F, 192.0F, 30.0F},
     HudGlyph{'L', 403.015625F, 254.0F, 433.015625F, 192.0F, 30.0F},
     HudGlyph{'M', 436.015625F, 254.0F, 485.015625F, 192.0F, 49.0F},
+    HudGlyph{'O', 35.015625F, 191.015625F, 65.015625F, 129.015625F, 30.0F},
     HudGlyph{'P', 68.015625F, 191.015625F, 98.015625F, 129.015625F, 30.0F},
     HudGlyph{'0', 445.015625F, 191.015625F, 475.015625F, 129.015625F, 30.0F},
     HudGlyph{'1', 478.015625F, 191.015625F, 508.015625F, 129.015625F, 30.0F},
@@ -185,11 +187,26 @@ Vec3 rotateBlockVector(const Vec3 value, const std::uint8_t direction) {
   }
 }
 
-Vec3 placeBlockPosition(const Vec3 value, const gbx::ChallengeBlock& block) {
+Vec3 placeBlockPosition(const Vec3 value, const gbx::ChallengeBlock& block,
+                        const std::array<std::int32_t, 2> footprint) {
   constexpr float kHorizontalCellSize = 32.0F;
   constexpr float kVerticalCellSize = 8.0F;
-  constexpr Vec3 cellCenter{16.0F, 0.0F, 16.0F};
-  const Vec3 rotated = rotateBlockVector(value - cellCenter, block.direction) + cellCenter;
+  const float width = static_cast<float>(std::max(footprint[0], 1)) * kHorizontalCellSize;
+  const float depth = static_cast<float>(std::max(footprint[1], 1)) * kHorizontalCellSize;
+  Vec3 rotated = value;
+  switch (block.direction & 3U) {
+  case 1:
+    rotated = {depth - value.z, value.y, value.x};
+    break;
+  case 2:
+    rotated = {width - value.x, value.y, depth - value.z};
+    break;
+  case 3:
+    rotated = {value.z, value.y, width - value.x};
+    break;
+  default:
+    break;
+  }
   return rotated + Vec3{static_cast<float>(block.coordinate[0]) * kHorizontalCellSize,
                         static_cast<float>(block.coordinate[1]) * kVerticalCellSize,
                         static_cast<float>(block.coordinate[2]) * kHorizontalCellSize};
@@ -233,11 +250,44 @@ Mat4 lookAt(const Vec3 eye, const Vec3 target, const Vec3 up) {
   };
 }
 
-Mat4 vehicleModelMatrix(const Vec3 center, const float heading, const float scale) {
-  const float cosine = std::cos(heading);
-  const float sine = std::sin(heading);
-  return {cosine * scale, 0.0F, -sine * scale,  0.0F, 0.0F,     scale,    0.0F,     0.0F,
-          sine * scale,   0.0F, cosine * scale, 0.0F, center.x, center.y, center.z, 1.0F};
+struct VehicleBasis final {
+  Vec3 right;
+  Vec3 up;
+  Vec3 forward;
+};
+
+VehicleBasis vehicleBasis(const std::array<float, 4>& quaternion) {
+  const float w = quaternion[0];
+  const float x = quaternion[1];
+  const float y = quaternion[2];
+  const float z = quaternion[3];
+  return {{1.0F - 2.0F * (y * y + z * z), 2.0F * (x * y + z * w),
+           2.0F * (x * z - y * w)},
+          {2.0F * (x * y - z * w), 1.0F - 2.0F * (x * x + z * z),
+           2.0F * (y * z + x * w)},
+          {2.0F * (x * z + y * w), 2.0F * (y * z - x * w),
+           1.0F - 2.0F * (x * x + y * y)}};
+}
+
+Mat4 vehicleModelMatrix(const Vec3 center, const std::array<float, 4>& orientationWxyz,
+                        const float scale) {
+  const VehicleBasis basis = vehicleBasis(orientationWxyz);
+  return {basis.right.x * scale,   basis.right.y * scale,   basis.right.z * scale,   0.0F,
+          basis.up.x * scale,      basis.up.y * scale,      basis.up.z * scale,      0.0F,
+          basis.forward.x * scale, basis.forward.y * scale, basis.forward.z * scale, 0.0F,
+          center.x,          center.y,          center.z,          1.0F};
+}
+
+Mat4 wheelSteeringMatrix(const Vec3 pivot, const float angle) {
+  const float cosine = std::cos(angle);
+  const float sine = std::sin(angle);
+  const Mat4 rotation{cosine, 0.0F, -sine, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F,
+                      sine,   0.0F, cosine, 0.0F, 0.0F, 0.0F, 1.0F};
+  const Mat4 toPivot{1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F,
+                     0.0F, 0.0F, 1.0F, 0.0F, pivot.x, pivot.y, pivot.z, 1.0F};
+  const Mat4 fromPivot{1.0F, 0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F,
+                       0.0F, 0.0F, 1.0F, 0.0F, -pivot.x, -pivot.y, -pivot.z, 1.0F};
+  return multiply(multiply(toPivot, rotation), fromPivot);
 }
 
 void logEglFailure(const char* operation) {
@@ -531,6 +581,8 @@ void EglRenderer::detach() {
   meshTextureUniform_ = -1;
   meshIndexCount_ = 0;
   vehicleIndexCount_ = 0;
+  camera_.clear();
+  cameraResetRequested_ = true;
 }
 
 void EglRenderer::resize() {
@@ -556,15 +608,27 @@ void EglRenderer::draw(const double seconds) {
     Vec3 normalizedVehicle{};
     Vec3 eye{};
     Vec3 target{};
+    Vec3 viewUp{0.0F, 1.0F, 0.0F};
+    float verticalFieldOfViewDegrees = 54.0F;
     if (vehicleVisible_) {
       normalizedVehicle = (Vec3{vehiclePosition_.x, vehiclePosition_.y, vehiclePosition_.z} -
                            Vec3{meshWorldCenter_.x, meshWorldCenter_.y, meshWorldCenter_.z}) *
                           meshWorldInverseExtent_;
-      const Vec3 forward{std::sin(vehicleHeading_), 0.0F, std::cos(vehicleHeading_)};
-      eye = normalizedVehicle - forward * (14.0F * meshWorldInverseExtent_) +
-            Vec3{0.0F, 7.0F * meshWorldInverseExtent_, 0.0F};
-      target = normalizedVehicle + forward * (7.0F * meshWorldInverseExtent_) +
-               Vec3{0.0F, 1.0F * meshWorldInverseExtent_, 0.0F};
+      const VehicleBasis basis = vehicleBasis(vehicleOrientationWxyz_);
+      const Vec3 up = basis.up;
+      const Vec3 forward = basis.forward;
+      const tmnf::gameplay::Race3CameraFrame camera = camera_.update(
+          {up.x, up.y, up.z}, {forward.x, forward.y, forward.z},
+          vehicleForwardSpeedMetersPerSecond_, seconds, cameraResetRequested_);
+      cameraResetRequested_ = false;
+      eye = normalizedVehicle +
+            Vec3{camera.eyeOffset.x, camera.eyeOffset.y, camera.eyeOffset.z} *
+                meshWorldInverseExtent_;
+      target = normalizedVehicle +
+               Vec3{camera.targetOffset.x, camera.targetOffset.y, camera.targetOffset.z} *
+                   meshWorldInverseExtent_;
+      viewUp = {camera.up.x, camera.up.y, camera.up.z};
+      verticalFieldOfViewDegrees = camera.verticalFieldOfViewDegrees;
     } else {
       const float angle = static_cast<float>(seconds) * 0.12F + imageOffsetX_ * 3.2F;
       const float elevation = 1.15F + imageOffsetY_ * 2.4F;
@@ -572,10 +636,10 @@ void EglRenderer::draw(const double seconds) {
       eye = {std::sin(angle) * distance, elevation, std::cos(angle) * distance};
       target = {0.0F, 0.0F, 0.0F};
     }
-    const Mat4 view = lookAt(eye, target, {0.0F, 1.0F, 0.0F});
+    const Mat4 view = lookAt(eye, target, viewUp);
     const Mat4 projection =
-        perspective(54.0F * kPi / 180.0F, static_cast<float>(width_) / static_cast<float>(height_),
-                    0.001F, 20.0F);
+        perspective(verticalFieldOfViewDegrees * kPi / 180.0F,
+                    static_cast<float>(width_) / static_cast<float>(height_), 0.001F, 20.0F);
     const Mat4 mvp = multiply(projection, view);
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -594,12 +658,18 @@ void EglRenderer::draw(const double seconds) {
                      reinterpret_cast<const void*>(byteOffset));
     }
     if (vehicleVisible_ && vehicleVertexArray_ != 0 && vehicleIndexCount_ > 0) {
-      const Mat4 vehicleModel =
-          vehicleModelMatrix(normalizedVehicle, vehicleHeading_, meshWorldInverseExtent_);
+      const Mat4 vehicleModel = vehicleModelMatrix(
+          normalizedVehicle, vehicleOrientationWxyz_, meshWorldInverseExtent_);
       const Mat4 vehicleMvp = multiply(mvp, vehicleModel);
-      glUniformMatrix4fv(meshMvpUniform_, 1, GL_FALSE, vehicleMvp.data());
       glBindVertexArray(vehicleVertexArray_);
       for (const MeshDraw& draw : vehicleDraws_) {
+        Mat4 drawMvp = vehicleMvp;
+        if (draw.frontWheel) {
+          const Mat4 steering = wheelSteeringMatrix(
+              {draw.pivot.x, draw.pivot.y, draw.pivot.z}, frontWheelSteeringRadians_);
+          drawMvp = multiply(vehicleMvp, steering);
+        }
+        glUniformMatrix4fv(meshMvpUniform_, 1, GL_FALSE, drawMvp.data());
         glBindTexture(GL_TEXTURE_2D, draw.texture == 0 ? meshFallbackTexture_ : draw.texture);
         const auto byteOffset =
             static_cast<std::uintptr_t>(draw.firstIndex) * sizeof(std::uint32_t);
@@ -664,28 +734,44 @@ void EglRenderer::setScene(tmnf::content::TrackScene scene, tmnf::gbx::SolidMode
   scene_ = std::move(scene);
   vehicleSolid_ = std::move(vehicleSolid);
   vehicleMaterials_ = std::move(vehicleMaterials);
+  camera_.clear();
+  cameraResetRequested_ = true;
   if (ready()) {
     createMeshResources();
   }
 }
 
-void EglRenderer::setVehiclePose(const tmnf::gbx::Float3 position, const float heading) noexcept {
+void EglRenderer::setVehiclePose(const tmnf::gbx::Float3 position,
+                                  const std::array<float, 4> orientationWxyz,
+                                  const float frontWheelSteeringRadians,
+                                  const float signedForwardSpeedMetersPerSecond,
+                                  const bool resetCamera) noexcept {
   vehiclePosition_ = position;
-  vehicleHeading_ = heading;
+  vehicleOrientationWxyz_ = orientationWxyz;
+  frontWheelSteeringRadians_ = frontWheelSteeringRadians;
+  vehicleForwardSpeedMetersPerSecond_ = signedForwardSpeedMetersPerSecond;
+  cameraResetRequested_ = cameraResetRequested_ || resetCamera;
   vehicleVisible_ = true;
 }
 
-void EglRenderer::setRaceHud(const float raceTimeSeconds, const std::uint32_t checkpointCount,
+void EglRenderer::setRaceHud(const float raceTimeSeconds, const float speedMetersPerSecond,
+                             const std::uint32_t checkpointCount,
                              const std::uint32_t checkpointTotal, const std::uint32_t completedLaps,
                              const std::uint32_t lapTotal, const bool finished) noexcept {
   hudRaceTimeSeconds_ =
       std::isfinite(raceTimeSeconds) && raceTimeSeconds >= 0.0F ? raceTimeSeconds : 0.0F;
+  hudSpeedMetersPerSecond_ =
+      std::isfinite(speedMetersPerSecond) ? std::abs(speedMetersPerSecond) : 0.0F;
   hudCheckpointCount_ = checkpointCount;
   hudCheckpointTotal_ = checkpointTotal;
   hudCompletedLaps_ = completedLaps;
   hudLapTotal_ = std::max(lapTotal, 1U);
   hudFinished_ = finished;
   hudVisible_ = true;
+}
+
+void EglRenderer::setRaceStartPhase(const tmnf::gameplay::RaceStartPhase phase) noexcept {
+  hudRaceStartPhase_ = phase;
 }
 
 void EglRenderer::setMapSelector(const std::uint32_t mapIndex, const std::uint32_t mapTotal,
@@ -812,6 +898,7 @@ void EglRenderer::drawHud() {
   std::array<char, 32> timer{};
   std::array<char, 32> checkpoint{};
   std::array<char, 32> lap{};
+  std::array<char, 16> speed{};
   const auto formatTime = [](std::array<char, 32>& output, const std::uint64_t totalMilliseconds,
                              const char* const prefix) {
     std::snprintf(output.data(), output.size(), "%s%02llu:%02llu.%03llu", prefix,
@@ -827,6 +914,9 @@ void EglRenderer::drawHud() {
   const std::uint32_t currentLap =
       hudFinished_ ? hudLapTotal_ : std::min(hudCompletedLaps_ + 1U, hudLapTotal_);
   std::snprintf(lap.data(), lap.size(), "LAP %u/%u", currentLap, hudLapTotal_);
+  const auto speedKilometresPerHour = static_cast<unsigned int>(
+      std::clamp(std::lround(hudSpeedMetersPerSecond_ * 3.6F), 0L, 9'999L));
+  std::snprintf(speed.data(), speed.size(), "%u", speedKilometresPerHour);
 
   const float scale = std::clamp(static_cast<float>(height_) / 1080.0F, 0.65F, 1.25F);
   const float margin = 22.0F * scale;
@@ -848,6 +938,39 @@ void EglRenderer::drawHud() {
                     static_cast<float>(width_) - margin - hudTextWidth(lapText) * scale,
                     margin + 68.0F * scale, scale, width_, height_);
     }
+    if (!selectorVisible_) {
+      const std::string_view speedText(speed.data());
+      const float speedScale = scale * 1.45F;
+      appendHudText(vertices, vertexCount, speedText,
+                    (static_cast<float>(width_) - hudTextWidth(speedText) * speedScale) * 0.5F,
+                    static_cast<float>(height_) - margin - 62.0F * speedScale, speedScale, width_,
+                    height_);
+    }
+  }
+  if (hudVisible_ && !selectorVisible_ &&
+      hudRaceStartPhase_ != tmnf::gameplay::RaceStartPhase::Hidden) {
+    std::string_view countdownText;
+    switch (hudRaceStartPhase_) {
+    case tmnf::gameplay::RaceStartPhase::Countdown3:
+      countdownText = "3";
+      break;
+    case tmnf::gameplay::RaceStartPhase::Countdown2:
+      countdownText = "2";
+      break;
+    case tmnf::gameplay::RaceStartPhase::Countdown1:
+      countdownText = "1";
+      break;
+    case tmnf::gameplay::RaceStartPhase::Go:
+      countdownText = "GO";
+      break;
+    case tmnf::gameplay::RaceStartPhase::Hidden:
+      break;
+    }
+    const float countdownScale = scale * 1.8F;
+    appendHudText(vertices, vertexCount, countdownText,
+                  (static_cast<float>(width_) - hudTextWidth(countdownText) * countdownScale) *
+                      0.5F,
+                  static_cast<float>(height_) * 0.34F, countdownScale, width_, height_);
   }
   if (selectorVisible_) {
     std::array<char, 32> selectedMap{};
@@ -1010,7 +1133,7 @@ bool EglRenderer::createMeshResources() {
       const int firstIndex = static_cast<int>(indices.size());
       for (std::size_t vertexIndex = 0; vertexIndex < visual.positions.size(); ++vertexIndex) {
         const Vec3 localPosition = transformPosition(visual, visual.positions[vertexIndex]);
-        const Vec3 position = placeBlockPosition(localPosition, block);
+        const Vec3 position = placeBlockPosition(localPosition, block, placement.footprint);
         minimum.x = std::min(minimum.x, position.x);
         minimum.y = std::min(minimum.y, position.y);
         minimum.z = std::min(minimum.z, position.z);
@@ -1159,6 +1282,10 @@ bool EglRenderer::createMeshResources() {
       if (textureIndex < vehicleMaterials_.textures.size()) {
         draw.texture = meshMaterialTextures_[trackTextureCount + textureIndex];
       }
+    }
+    draw.frontWheel = visual.treeName == "3FLWheel" || visual.treeName == "3FRWheel";
+    if (draw.frontWheel) {
+      draw.pivot = {visual.transform[9], visual.transform[10], visual.transform[11]};
     }
     if (draw.indexCount > 0) {
       vehicleDraws_.push_back(draw);

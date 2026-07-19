@@ -25,6 +25,7 @@ constexpr std::int32_t kMaximumCount = 1 << 24;
 
 constexpr std::uint32_t kCPlugSolid = 0x09005000U;
 constexpr std::uint32_t kCPlugVisual = 0x09006000U;
+constexpr std::uint32_t kCPlugSurface = 0x0900c000U;
 constexpr std::uint32_t kCPlugSurfaceGeom = 0x0900f000U;
 constexpr std::uint32_t kCPlugTreeVisualMip = 0x09015000U;
 constexpr std::uint32_t kCPlugVisualSprite = 0x09010000U;
@@ -246,6 +247,7 @@ public:
     if (!parseNode(document_.header.classId, document_.firstChunkId, false, 0)) {
       return failed(reader_.takeError());
     }
+    resolveTreeTransforms();
     resolveVisualMipLevels();
     if (input_.position() != input_.size()) {
       return failed("CPlugSolid body has trailing logical bytes");
@@ -264,7 +266,11 @@ private:
     std::uint32_t classId = 0;
     bool external = false;
     std::optional<std::size_t> visualIndex;
+    std::optional<std::int32_t> surfaceIndex;
+    std::optional<std::pair<std::size_t, std::size_t>> collisionShapes;
     std::vector<std::int32_t> children;
+    std::array<float, 12> transform{1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
+                                    0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F};
     std::string name;
     std::string externalPath;
   };
@@ -279,6 +285,7 @@ private:
   };
 
   struct VisualMipReference final {
+    std::int32_t ownerIndex = -1;
     std::int32_t nodeIndex = -1;
     std::size_t levelIndex = 0;
   };
@@ -354,6 +361,7 @@ private:
     }
 
     std::optional<std::size_t> visualIndex;
+    const std::size_t firstCollisionShape = solid_.collisionShapes.size();
     if (isClassOrDerived(classId, kCPlugVisual)) {
       visualIndex = solid_.visuals.size();
       solid_.visuals.emplace_back();
@@ -367,6 +375,7 @@ private:
     std::array<float, 12> transform{1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
                                     0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F};
     std::optional<std::size_t> attachedVisual;
+    std::optional<std::int32_t> attachedSurface;
 
     while (true) {
       std::uint32_t chunkId = 0;
@@ -414,6 +423,9 @@ private:
           return false;
         }
         solid_.rootTreeName = tree.name;
+        if (tree.index >= 0) {
+          rootTreeIndex_ = tree.index;
+        }
         break;
       }
       case 0x09005012U: {
@@ -464,6 +476,9 @@ private:
           return false;
         }
         attachedVisual = visual.visualIndex;
+        if (surface.index >= 0) {
+          attachedSurface = surface.index;
+        }
         materialReference = shader.externalPath;
         break;
       }
@@ -492,7 +507,8 @@ private:
           }
           if (tree.index >= 0) {
             visualMipReferences_.push_back(
-                VisualMipReference{tree.index, static_cast<std::size_t>(index)});
+                VisualMipReference{nodeIndex.value_or(-1), tree.index,
+                                   static_cast<std::size_t>(index)});
           }
         }
         break;
@@ -588,7 +604,10 @@ private:
         records_.at(*nodeIndex).visualIndex = attachedVisual;
       }
       if (nodeIndex.has_value()) {
-        records_.at(*nodeIndex).name = treeName;
+        NodeRecord& record = records_.at(*nodeIndex);
+        record.name = treeName;
+        record.surfaceIndex = attachedSurface;
+        record.transform = transform;
       }
       if (attachedVisual.has_value()) {
         SolidVisual& visual = solid_.visuals[*attachedVisual];
@@ -597,6 +616,12 @@ private:
         visual.treeFlags = treeFlags;
         visual.transform = transform;
       }
+    }
+    if (nodeIndex.has_value() &&
+        (classId == kCPlugSurface || classId == kCPlugSurfaceGeom) &&
+        firstCollisionShape != solid_.collisionShapes.size()) {
+      records_.at(*nodeIndex).collisionShapes =
+          std::pair{firstCollisionShape, solid_.collisionShapes.size()};
     }
     return true;
   }
@@ -776,6 +801,7 @@ private:
     if (!readNodeReference(geometry) || !reader_.readCount(materialCount, "surface material")) {
       return false;
     }
+    const std::size_t materialOffset = solid_.surfaceMaterials.size();
     for (std::int32_t index = 0; index < materialCount; ++index) {
       bool hasMaterial = false;
       if (!reader_.readBoolean(hasMaterial)) {
@@ -787,12 +813,29 @@ private:
           return false;
         }
         solid_.surfaceMaterials.push_back(-1);
+        solid_.surfaceMaterialReferences.push_back(std::move(material.externalPath));
       } else {
         std::int16_t surfaceId = 0;
         if (!reader_.readI16(surfaceId)) {
           return false;
         }
         solid_.surfaceMaterials.push_back(surfaceId);
+        solid_.surfaceMaterialReferences.emplace_back();
+      }
+    }
+    if (geometry.index >= 0) {
+      const auto record = records_.find(geometry.index);
+      if (record != records_.end() && record->second.collisionShapes.has_value()) {
+        const auto [begin, end] = *record->second.collisionShapes;
+        for (std::size_t shape = begin; shape < end; ++shape) {
+          const std::array<std::size_t, 2> range{
+              materialOffset, static_cast<std::size_t>(materialCount)};
+          if (solid_.collisionShapes[shape].surfaceMaterialRange.has_value() &&
+              solid_.collisionShapes[shape].surfaceMaterialRange != range) {
+            return reader_.fail("CPlugSurface geometry has multiple material tables");
+          }
+          solid_.collisionShapes[shape].surfaceMaterialRange = range;
+        }
       }
     }
     return true;
@@ -1130,6 +1173,57 @@ private:
     }
   }
 
+  void resolveTreeTransforms() {
+    if (!rootTreeIndex_.has_value()) {
+      return;
+    }
+    constexpr std::array<float, 12> identity{1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
+                                             0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F};
+    std::unordered_set<std::int32_t> visited;
+    std::unordered_set<std::size_t> transformedCollisionShapes;
+    applyTreeTransforms(*rootTreeIndex_, identity, visited, transformedCollisionShapes);
+  }
+
+  void applyTreeTransforms(const std::int32_t nodeIndex, const std::array<float, 12>& parent,
+                           std::unordered_set<std::int32_t>& visited,
+                           std::unordered_set<std::size_t>& transformedCollisionShapes) {
+    if (!visited.insert(nodeIndex).second) {
+      return;
+    }
+    const auto node = records_.find(nodeIndex);
+    if (node == records_.end()) {
+      return;
+    }
+    const std::array<float, 12> composed = multiplyIso4(parent, node->second.transform);
+    if (!node->second.name.empty()) {
+      solid_.treeTransforms.push_back({node->second.name, composed});
+    }
+    if (node->second.visualIndex.has_value()) {
+      solid_.visuals[*node->second.visualIndex].transform = composed;
+    }
+    if (node->second.surfaceIndex.has_value()) {
+      const auto surface = records_.find(*node->second.surfaceIndex);
+      if (surface != records_.end() && surface->second.collisionShapes.has_value()) {
+        const auto [begin, end] = *surface->second.collisionShapes;
+        for (std::size_t shape = begin; shape < end; ++shape) {
+          if (transformedCollisionShapes.insert(shape).second) {
+            solid_.collisionShapes[shape].treeName = node->second.name;
+            solid_.collisionShapes[shape].transform =
+                multiplyIso4(composed, solid_.collisionShapes[shape].transform);
+          }
+        }
+      }
+    }
+    for (const std::int32_t child : node->second.children) {
+      applyTreeTransforms(child, composed, visited, transformedCollisionShapes);
+    }
+    for (const VisualMipReference& reference : visualMipReferences_) {
+      if (reference.ownerIndex == nodeIndex) {
+        applyTreeTransforms(reference.nodeIndex, composed, visited, transformedCollisionShapes);
+      }
+    }
+  }
+
   void collectVisuals(const std::int32_t nodeIndex, std::unordered_set<std::size_t>& visuals,
                       std::unordered_set<std::int32_t>& visited) const {
     if (!visited.insert(nodeIndex).second) {
@@ -1184,6 +1278,7 @@ private:
   SolidModel solid_;
   std::unordered_map<std::int32_t, NodeRecord> records_;
   std::vector<VisualMipReference> visualMipReferences_;
+  std::optional<std::int32_t> rootTreeIndex_;
   std::optional<std::int32_t> idVersion_;
   std::unordered_map<std::uint32_t, std::string> ids_;
 };

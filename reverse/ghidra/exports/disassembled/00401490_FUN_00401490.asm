@@ -1,0 +1,7 @@
+00401490  CMP dword ptr [ECX + 0xfc],0x0
+00401497  JZ 0x004014a9
+00401499  MOV ECX,dword ptr [ECX + 0xfc]
+0040149f  MOV EAX,dword ptr [ECX]
+004014a1  MOV EDX,dword ptr [EAX + 0xac]
+004014a7  JMP EDX
+004014a9  JMP 0x006b2920

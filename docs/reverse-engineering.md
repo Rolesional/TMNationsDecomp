@@ -105,9 +105,13 @@ candidate solids keeps 616 high-detail visuals and suppresses 344 lower-detail c
 contain 79 version-3 mesh shapes with 42,815 unique vertices and 232,116 unique indices.
 For `TubeRoad_BaseGround`, its 104 collision positions and 558 indices match GBX.NET
 byte-for-byte (`CC9A7BBC6B8D9136EB6D385F49FCA86B` and
-`D2AEE7F055F44CCC39F5934A70B1079A`). Instancing those shapes with the same block
-transforms used by rendering produces 176,464 world triangles indexed into 364 grid
-cells for portable height queries.
+`D2AEE7F055F44CCC39F5934A70B1079A`). `CPlugSurface` owns a local material table for
+each referenced geometry, so the parser records that table's range instead of flattening
+unrelated tables. External `CPlugMaterial` nodes expose their numeric surface in chunk
+`0x0907900E`; surface 28 is the native `NotCollidable` boundary and is discarded before
+the portable collision grid is built. On A01 that removes exactly 136 authored triangles
+(64 Start, 40 Finish, and 32 Checkpoint), leaving 176,328 world triangles and 359 occupied
+grid cells. The start road resolves to Asphalt (surface 16).
 
 ## Challenge and track assembly
 
@@ -139,14 +143,80 @@ basis consistently keeps visual placements, collision, and the start transform a
 The recovered DDS/mesh path also reflects the Direct3D-authored V coordinate at the
 GLES upload boundary, so asymmetric decals and lettering render upright on Android.
 
-The current vehicle dynamics are a portable deterministic stand-in, not recovered TMNF
-physics. The simulation initializes from the decoded start ground/air transform, follows
-decoded ground triangles, applies substepped acceleration/braking/steering/gravity, and
-supports horizontal contact against decoded non-ground triangles, respawn, and lifecycle
-state validation. Ordered two-sided trigger meshes now drive checkpoints, finishes, lap
-counts, race timing, and `NoRespawn` behavior. The GLES path renders the packed Stadium
-car's seven-mesh low LOD with its original three texture images at the simulated pose;
-exact vehicle/contact dynamics remain recovery work.
+The vehicle remains only partially recovered, but its current contact path is no longer a
+height-query stand-in. It initializes from the decoded start transform, uses the active
+legacy Stadium tuning, samples the source one-sided triangle/ellipsoid narrowphase for
+four wheel ellipsoids, and enumerates all contacts for the four authored body ellipsoids.
+The body callback applies source-ordered correction reduction plus effective-mass linear/
+angular impulses. The remaining known wheel mismatch is that portable suspension sampling
+selects one maximum-axis contact while the native callback path retains every accepted
+contact. `FUN_009DA440` makes wheel state deliberately order-sensitive: the last callback
+owns final support and point, all supporting callbacks contribute to the raw normal sum,
+the last supporting callback owns material, and maximum positive suspension absorption is
+tracked while each residual remains on its contact. `FUN_006847C0` then appends body and
+wheel corrections to one list per rigid body; `FUN_006907F0 -> FUN_0068FF90` reduces that
+single list after dispatch. The portable broadphase does not yet prove native
+collision-pair interleaving, so this is documented rather than replaced with a guessed
+loop.
+Ordered two-sided trigger meshes drive checkpoints, finishes, lap counts, race timing, and
+`NoRespawn` behavior. The GLES path renders the packed Stadium car's seven-mesh low LOD
+with its original three texture images at the simulated pose.
+
+## Race3 chase camera
+
+The ordinary chase view is owned by `CGameControlCameraTrackManiaRace3`: constructor
+`0x006F1E10`, reset `0x006F3880`, and update `0x006F41E0`. Its neutral reset eye is
+`P + 2*U - 4*F`; the look target is `P + U`, and the view-up vector is the smoothed
+vehicle up rather than world Y. Direction and up are spherical low-pass filters whose
+ordinary-mode fractions are:
+
+```text
+direction t = speedGain * clamp(5*dt / (2*theta + 1), 0, 1)
+up        t = speedGain * clamp(4*dt / (2*phi   + 1), 0, 1)
+```
+
+`dt` is capped at 0.2 seconds and a backwards clock yields zero. `speedGain` is the
+piecewise-linear curve X `[-100,-50,0,250,500,700]` km/h and
+Y `[1.5,1.2,1,1.5,2,3]`. The neutral distance is `sqrt(20)` and uses
+`v += dt*((sqrt(20)-x)*10-v*5)`, followed by `x += dt*v`. The slower 3/1 angular gains
+belong to a special internal mode and are not used for ordinary Race3 driving. Vehicle
+position is added directly each frame; there is no eye/target world-position spring.
+Ordinary vertical FOV is 90 degrees. Turbo adds a cosine-ramped 10.5-degree delta with
+1000 ms rise and 1400 ms fall, which remains deferred with the Turbo state machine.
+
+## Race start clock
+
+The single-player countdown timing is recovered from the executable rather than chosen
+by feel. `CTrackManiaRace1P::vftable` slot `+0x110` points to `0x00715310`, which returns
+`0x9C4` (2,500 ms). `0x00715320` derives the countdown end and start timestamps from that
+virtual duration. `0x00715460` divides the open interval between the start field at
+`+0x28C` and end field at `+0x294` into three integer phases; for 2,500 ms the transitions
+are 834 and 1,667 ms. It plays cue IDs `0x1E`, `0x1D`, and `0x1C` for 3, 2, and 1, then
+keeps phase 3/Go visible while race state `+0x2FC` is 1 and the clock is less than end plus
+500 ms. The central race update at `0x0071890B` transitions to state 1 when
+`current >= end`, and `0x0074EB40` returns zero before that state then derives active
+race time as `current - end`. Player controls are sampled earlier in the update at
+`0x00718833`; the start state constrains motion rather than discarding input.
+
+The constraint is now traced exactly. `0x0071E030` calls vehicle slot `+0x140(1)`, which
+sets the freeze bit through `0x009D5350`. While frozen, `0x009E004F` bypasses propulsion,
+suspension, tire, and brake force solving and overwrites linear/angular velocity, net
+force, and torque with zero. Outer collision dispatch remains active. At Go,
+`0x00718960` clears the freeze and `0x0071896C` immediately calls reset `0x009D9590`;
+per-wheel reset `0x009D6430` restores the authored suspension rest length and clears
+speed, pending correction, support, and contact. A01's shallow flat wheel overlap is
+fully suspension-absorbed during the countdown, produces no chassis translation, and is
+then cleared by that reset.
+
+The portable `RaceStartClock` keeps consuming held input while holding portable vehicle
+and race time at zero through the 2.5-second interval, releases only the post-boundary
+portion of a crossing frame, and uses the original four loose Race3/Race2/Race1/RaceGo
+WAVs. `VehicleSimulation` consumes released time through a 120 Hz accumulator so an
+arbitrary microsecond crossing-frame tail cannot become a suspension derivative step.
+Portable countdown collision-only dispatch remains a known non-A01 parity gap for a
+start with deeper or nonvertical contact. The 2,500 ms duration is specific to the
+base/single-player modes used here; NetLaps and NetRounds override the same virtual slot
+with 3,000 ms.
 
 The cryptographic behavior was also cross-checked against the MIT-licensed GBX.NET
 implementation identified in `THIRD_PARTY_NOTICES.md`; executable addresses and the

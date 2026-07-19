@@ -20,12 +20,33 @@ tmnf::content::TrackScene makeFixture() {
   tmnf::gbx::SolidCollisionShape shape;
   shape.type = tmnf::gbx::SolidCollisionType::Mesh;
   shape.archiveVersion = 3;
-  shape.positions = {{0.0F, 0.0F, 0.0F}, {32.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 32.0F}};
-  shape.indices = {0, 2, 1};
-  shape.triangleSurfaceIndices = {0};
+  shape.positions = {{0.0F, 0.0F, 0.0F}, {32.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 32.0F},
+                     {0.0F, 4.0F, 0.0F}, {32.0F, 4.0F, 0.0F}, {0.0F, 4.0F, 32.0F}};
+  shape.indices = {0, 2, 1, 3, 5, 4};
+  shape.triangleSurfaceIndices = {0, 1};
   shape.surfaceId = 0;
+  shape.surfaceMaterialRange = std::array<std::size_t, 2>{0, 2};
   model.solid.collisionShapes.push_back(std::move(shape));
-  model.solid.surfaceMaterials.push_back(16);
+  tmnf::gbx::SolidCollisionShape fallbackNotCollidable;
+  fallbackNotCollidable.type = tmnf::gbx::SolidCollisionType::Mesh;
+  fallbackNotCollidable.archiveVersion = 3;
+  fallbackNotCollidable.positions = {
+      {0.0F, 8.0F, 0.0F}, {32.0F, 8.0F, 0.0F}, {0.0F, 8.0F, 32.0F}};
+  fallbackNotCollidable.indices = {0, 2, 1};
+  fallbackNotCollidable.triangleSurfaceIndices = {-1};
+  fallbackNotCollidable.surfaceId = 28;
+  model.solid.collisionShapes.push_back(std::move(fallbackNotCollidable));
+  tmnf::gbx::SolidCollisionShape secondTable;
+  secondTable.type = tmnf::gbx::SolidCollisionType::Mesh;
+  secondTable.archiveVersion = 3;
+  secondTable.positions = {
+      {64.0F, 0.0F, 0.0F}, {96.0F, 0.0F, 0.0F}, {64.0F, 0.0F, 32.0F}};
+  secondTable.indices = {0, 2, 1};
+  secondTable.triangleSurfaceIndices = {0};
+  secondTable.surfaceId = 0;
+  secondTable.surfaceMaterialRange = std::array<std::size_t, 2>{2, 1};
+  model.solid.collisionShapes.push_back(std::move(secondTable));
+  model.solid.surfaceMaterials = {16, 28, 4};
   scene.models.push_back(std::move(model));
   scene.placements.push_back({0, 0});
 
@@ -51,8 +72,8 @@ int main() {
     std::cerr << built.error << '\n';
     return 1;
   }
-  if (built.collision.positions.size() != 3 || built.collision.indices.size() != 3 ||
-      built.collision.triangleSurfaceIds != std::vector<std::int16_t>{16} ||
+  if (built.collision.positions.size() != 12 || built.collision.indices.size() != 6 ||
+      built.collision.triangleSurfaceIds != std::vector<std::int16_t>{16, 4} ||
       built.collision.triggers.size() != 1U ||
       built.collision.triggers.front().indices.size() != 6U) {
     std::cerr << "instanced collision mesh is incorrect\n";
@@ -79,6 +100,13 @@ int main() {
     std::cerr << "ground query hit outside the fixture triangle\n";
     return 1;
   }
+  const auto secondTableHit =
+      tmnf::content::sampleTrackGround(built.collision, 104.0F, 40.0F, 0.0F, 32.0F);
+  if (!secondTableHit.has_value() || secondTableHit->surfaceId != 4 ||
+      !near(secondTableHit->height, 16.0F)) {
+    std::cerr << "per-surface local material table was flattened\n";
+    return 1;
+  }
 
   tmnf::content::TrackCollision wall;
   wall.gridWidth = 1;
@@ -98,6 +126,71 @@ int main() {
     std::cerr << "wall contact query hit outside the fixture radius\n";
     return 1;
   }
+  if (tmnf::content::sampleTrackWallContact(wall, {0.5F, 0.5F, 0.5F}, 1.0F, 2.1F)) {
+    std::cerr << "wall contact query did not honor the minimum contact height\n";
+    return 1;
+  }
+
+  tmnf::content::TrackCollision ellipsoidTrack;
+  ellipsoidTrack.gridWidth = 1;
+  ellipsoidTrack.gridDepth = 1;
+  ellipsoidTrack.positions = {{0.0F, 0.0F, 0.0F}, {0.0F, 0.0F, 2.0F},
+                              {2.0F, 0.0F, 0.0F}};
+  ellipsoidTrack.indices = {0, 1, 2};
+  ellipsoidTrack.triangleSurfaceIds = {42};
+  ellipsoidTrack.cellTriangles = {{0}};
+  constexpr std::array<float, 9> identity{1.0F, 0.0F, 0.0F, 0.0F, 1.0F,
+                                          0.0F, 0.0F, 0.0F, 1.0F};
+  const auto faceContact = tmnf::content::sampleTrackEllipsoidContact(
+      ellipsoidTrack, {0.5F, 0.3F, 0.5F}, {0.2F, 0.5F, 0.5F}, identity,
+      {0.0F, 1.0F, 0.0F});
+  if (!faceContact.has_value() || !near(faceContact->axisCorrection, 0.2F) ||
+      !near(faceContact->correction.y, 0.2F) || !near(faceContact->normal.y, 1.0F) ||
+      !near(faceContact->point.y, 0.0F) || faceContact->surfaceId != 42) {
+    std::cerr << "ellipsoid face correction does not match 008C1C70\n";
+    return 1;
+  }
+  const auto touchingContact = tmnf::content::sampleTrackEllipsoidContact(
+      ellipsoidTrack, {0.5F, 0.5F, 0.5F}, {0.2F, 0.5F, 0.5F}, identity,
+      {0.0F, 1.0F, 0.0F});
+  if (!touchingContact.has_value() || !near(touchingContact->axisCorrection, 0.0F) ||
+      !near(touchingContact->correction.y, 0.0F)) {
+    std::cerr << "source zero-correction ellipsoid contact was dropped\n";
+    return 1;
+  }
+  const auto edgeContact = tmnf::content::sampleTrackEllipsoidContact(
+      ellipsoidTrack, {1.2F, 0.2F, 1.2F}, {0.5F, 0.5F, 0.5F}, identity,
+      {0.0F, 1.0F, 0.0F});
+  if (!edgeContact.has_value() || !near(edgeContact->axisCorrection, 0.0886751F) ||
+      !near(edgeContact->point.x, 1.0F) || !near(edgeContact->point.y, 0.0F) ||
+      !near(edgeContact->point.z, 1.0F) || edgeContact->normal.y <= 0.5F) {
+    std::cerr << "ellipsoid edge correction does not match 008C1C70\n";
+    return 1;
+  }
+  constexpr std::array<float, 9> quarterTurnZ{0.0F, -1.0F, 0.0F, 1.0F, 0.0F,
+                                              0.0F, 0.0F, 0.0F, 1.0F};
+  const auto rotatedContact = tmnf::content::sampleTrackEllipsoidContact(
+      ellipsoidTrack, {0.5F, 0.1F, 0.5F}, {0.2F, 0.5F, 0.5F}, quarterTurnZ,
+      {0.0F, 1.0F, 0.0F});
+  if (!rotatedContact.has_value() || !near(rotatedContact->axisCorrection, 0.1F) ||
+      !near(rotatedContact->normal.y, 1.0F)) {
+    std::cerr << "rotated nonuniform ellipsoid correction is incorrect\n";
+    return 1;
+  }
+  tmnf::content::TrackCollision enumeratedTrack = ellipsoidTrack;
+  enumeratedTrack.indices.insert(enumeratedTrack.indices.end(), {0, 1, 2});
+  enumeratedTrack.triangleSurfaceIds.push_back(43);
+  enumeratedTrack.cellTriangles = {{0, 1, 0}};
+  std::vector<tmnf::content::TrackEllipsoidContact> enumeratedContacts;
+  tmnf::content::appendTrackEllipsoidContacts(
+      enumeratedTrack, {0.5F, 0.3F, 0.5F}, {0.2F, 0.5F, 0.5F}, identity,
+      enumeratedContacts);
+  if (enumeratedContacts.size() != 2U || enumeratedContacts[0].triangleIndex != 0U ||
+      enumeratedContacts[1].triangleIndex != 1U ||
+      enumeratedContacts[0].surfaceId != 42 || enumeratedContacts[1].surfaceId != 43) {
+    std::cerr << "ellipsoid contact enumeration/deduplication mismatch\n";
+    return 1;
+  }
 
   tmnf::gbx::ChallengeBlock rotated;
   rotated.coordinate = {1, 0, 1};
@@ -107,8 +200,14 @@ int main() {
     std::cerr << "block placement rotation is incorrect\n";
     return 1;
   }
+  const tmnf::gbx::Float3 placedTwoCell =
+      tmnf::content::placeTrackPoint({0.0F, 0.0F, 0.0F}, rotated, {2, 2});
+  if (!near(placedTwoCell.x, 96.0F) || !near(placedTwoCell.z, 32.0F)) {
+    std::cerr << "multi-cell block placement rotation is incorrect\n";
+    return 1;
+  }
 
-  scene.models[0].solid.collisionShapes[0].indices[2] = 3;
+  scene.models[0].solid.collisionShapes[0].indices[2] = 6;
   if (tmnf::content::buildTrackCollision(scene)) {
     std::cerr << "out-of-range collision index was accepted\n";
     return 1;

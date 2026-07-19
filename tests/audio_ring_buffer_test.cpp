@@ -1,3 +1,4 @@
+#include "tmnf/gbx/sound_engine.hpp"
 #include "tmnf/platform/audio.hpp"
 
 #include <array>
@@ -116,6 +117,64 @@ int main(const int argc, const char* const* argv) {
     return 1;
   }
 
+  const std::array loopFrames{StereoFrame{0.0F, 0.0F}, StereoFrame{1.0F, -1.0F},
+                              StereoFrame{0.0F, 0.0F}};
+  double loopCursor = 0.0;
+  const StereoFrame loop0 = tmnf::platform::sampleAudioLoop(loopFrames, loopCursor, 0.5F);
+  const StereoFrame loop1 = tmnf::platform::sampleAudioLoop(loopFrames, loopCursor, 0.5F);
+  const StereoFrame loop2 = tmnf::platform::sampleAudioLoop(loopFrames, loopCursor, 2.0F);
+  if (loop0.left != 0.0F || loop1.left != 0.5F || loop1.right != -0.5F ||
+      loop2.left != 1.0F || loopCursor != 0.0) {
+    std::cerr << "pitched audio-loop interpolation/wrap failed\n";
+    return 1;
+  }
+
+  tmnf::gbx::SoundEngineComponent idle;
+  idle.maxVolume = 0.81F;
+  idle.fadeOutStartRpm = 600.0F;
+  idle.fadeOutEndRpm = 4'000.0F;
+  idle.minPitch = 0.5F;
+  idle.maxPitch = 1.4F;
+  idle.pitchShiftStartRpm = 600.0F;
+  idle.pitchShiftEndRpm = 3'000.0F;
+  const tmnf::gbx::SoundEngineComponentMix idle0 =
+      tmnf::gbx::evaluateSoundEngineComponent(idle, 0.0F);
+  const tmnf::gbx::SoundEngineComponentMix idle1800 =
+      tmnf::gbx::evaluateSoundEngineComponent(idle, 1'800.0F);
+  if (idle0.volume != 0.81F || idle0.pitch != 0.5F ||
+      std::abs(idle1800.volume - 0.52411765F) > 0.00001F ||
+      std::abs(idle1800.pitch - 0.95F) > 0.00001F) {
+    std::cerr << "sound-engine component evaluation failed\n";
+    return 1;
+  }
+  tmnf::gbx::SoundEngineComponent reverse;
+  reverse.maxVolume = 0.81F;
+  reverse.fadeInStartRpm = -335.0F;
+  reverse.fadeInEndRpm = -600.0F;
+  reverse.fadeOutStartRpm = -8'000.0F;
+  reverse.fadeOutEndRpm = -17'000.0F;
+  reverse.minPitch = 0.3F;
+  reverse.maxPitch = 0.6F;
+  reverse.pitchShiftStartRpm = -500.0F;
+  reverse.pitchShiftEndRpm = -12'000.0F;
+  if (tmnf::gbx::evaluateSoundEngineComponent(reverse, -600.0F).volume != 0.81F ||
+      tmnf::gbx::evaluateSoundEngineComponent(reverse, 600.0F).volume != 0.0F) {
+    std::cerr << "signed reverse sound-engine component evaluation failed\n";
+    return 1;
+  }
+
+  tmnf::gbx::SoundEngine engine;
+  constexpr std::array curveValues{0.5F, 1.0F, 0.8F, 0.25F};
+  for (std::size_t index = 0; index < engine.volumeCurves.size(); ++index) {
+    engine.volumeCurves[index].x = {0.0F, 1.0F};
+    engine.volumeCurves[index].y = {curveValues[index], curveValues[index]};
+  }
+  if (std::abs(tmnf::gbx::evaluateSoundEngineVolume(engine, 0.0F, 0.0F, 0.0F, 0.0F) -
+               0.1F) > 0.00001F) {
+    std::cerr << "sound-engine root volume product failed\n";
+    return 1;
+  }
+
   const std::array monoSamples{std::int16_t{0}, std::int16_t{32767}};
   const std::vector<std::byte> monoWav = makePcm16Wav(1, 2, monoSamples);
   const tmnf::platform::AudioClipDecodeResult mono = tmnf::platform::decodePcm16Wav(monoWav, 4);
@@ -136,25 +195,27 @@ int main(const int argc, const char* const* argv) {
     std::cerr << "stereo PCM16 WAV validation failed\n";
     return 1;
   }
-  if (argc != 1 && argc != 3) {
-    std::cerr << "usage: audio_ring_buffer_test [RaceCheckPoint.wav RaceFinish.wav]\n";
+  if (argc != 1 && argc != 7 && argc != 13) {
+    std::cerr << "usage: audio_ring_buffer_test [six race WAVs [six engine WAVs]]\n";
     return 2;
   }
-  if (argc == 3) {
-    std::vector<std::byte> checkpointBytes;
-    std::vector<std::byte> finishBytes;
-    if (!readFile(argv[1], checkpointBytes) || !readFile(argv[2], finishBytes)) {
-      std::cerr << "unable to read reference race sounds\n";
-      return 1;
-    }
-    const tmnf::platform::AudioClipDecodeResult checkpoint =
-        tmnf::platform::decodePcm16Wav(checkpointBytes, 48'000);
-    const tmnf::platform::AudioClipDecodeResult finish =
-        tmnf::platform::decodePcm16Wav(finishBytes, 48'000);
-    if (!checkpoint || checkpoint.frames.size() != 72'281U || !finish ||
-        finish.frames.size() != 23'632U) {
-      std::cerr << "reference race sounds did not decode at 48 kHz\n";
-      return 1;
+  if (argc != 1) {
+    constexpr std::array expectedFrames{
+        72'281U, 23'632U, 53'353U, 53'353U, 53'353U, 67'710U,
+        158'490U, 58'889U, 52'487U, 59'836U, 58'801U, 118'069U,
+    };
+    for (std::size_t index = 0; index < static_cast<std::size_t>(argc - 1); ++index) {
+      std::vector<std::byte> bytes;
+      if (!readFile(argv[index + 1U], bytes)) {
+        std::cerr << "unable to read reference sound\n";
+        return 1;
+      }
+      const tmnf::platform::AudioClipDecodeResult decoded =
+          tmnf::platform::decodePcm16Wav(bytes, 48'000);
+      if (!decoded || decoded.frames.size() != expectedFrames[index]) {
+        std::cerr << "reference sound did not decode at 48 kHz\n";
+        return 1;
+      }
     }
   }
   return 0;

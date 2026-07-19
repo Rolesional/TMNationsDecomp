@@ -53,6 +53,12 @@ struct SolidMaterialBatchResolveResult final {
   [[nodiscard]] explicit operator bool() const noexcept { return error.empty(); }
 };
 
+struct SolidSurfaceMaterialResolveResult final {
+  std::string error;
+
+  [[nodiscard]] explicit operator bool() const noexcept { return error.empty(); }
+};
+
 // Follows CPlugMaterial -> CPlugBitmap reference tables in the mounted archives, then
 // asks looseFileReader/VFS for the referenced DDS/TGA. Bink-backed animated signs remain
 // unbound until video decoding exists. The diffuse/base texture is selected from the
@@ -67,5 +73,11 @@ resolveSolidMaterials(const gbx::SolidModel& solid, const pak::VirtualFileSystem
 resolveSolidMaterialBatch(std::span<const gbx::SolidModel* const> solids,
                           const pak::VirtualFileSystem& vfs,
                           const LooseFileReader& looseFileReader);
+
+// Resolves the CPlugMaterial surface ID referenced by each CPlugSurface slot.
+// Inline numeric slots are already complete and are left unchanged.
+[[nodiscard]] SolidSurfaceMaterialResolveResult
+resolveSolidSurfaceMaterials(std::span<gbx::SolidModel* const> solids,
+                             const pak::VirtualFileSystem& vfs);
 
 } // namespace tmnf::content

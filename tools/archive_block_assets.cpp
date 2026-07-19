@@ -166,7 +166,11 @@ int main(const int argc, const char* const* argv) {
     } else {
       const tmnf::content::BlockAssetGraph& graph = resolved.graph;
       std::cout << ", \"blockInfo\": \"" << jsonEscape(graph.blockInfoPath)
-                << "\", \"probedNodes\": " << graph.probedNodeCount << ", \"metadata\": ";
+                << "\", \"probedNodes\": " << graph.probedNodeCount
+                << ", \"groundFootprint\": [" << graph.groundFootprint[0] << ", "
+                << graph.groundFootprint[1] << "], \"airFootprint\": ["
+                << graph.airFootprint[0] << ", " << graph.airFootprint[1]
+                << "], \"metadata\": ";
       if (!graph.metadata.has_value()) {
         std::cout << "null";
       } else {

@@ -6,16 +6,21 @@ kept in `TmNationsForever/` and deliberately excluded from version control.
 
 The port targets Android 15 (`compileSdk`/`targetSdk` 35) and uses a C++ engine hosted
 by Android GameActivity. The first playable native slice now runs on-device: the app
-mounts user-deployed game data through the portable VFS, follows the original 65-map
+imports user-selected game data into private storage, mounts it through the portable VFS,
+follows the original 65-map
 Nations campaign order, builds the selected track scene and collision mesh, and drives
-the recovered Stadium car low LOD from the real start line with a chase camera. This is
-not yet a compatible release of the full game; exact vehicle dynamics, full UI/audio,
-replays, controlability, and source-proven unlock rules remain recovery work.
+the recovered Stadium car low LOD from the real start line with the source-recovered
+Race3 loose-follow camera.
+This is not yet a compatible release of the full game; exact contact dynamics, full
+vehicle audio, replays, broader UI, and source-proven unlock rules remain recovery work.
 
 ## Current recovery state
 
 - Reproducible Ghidra analysis of the exact 2.11.11 executable, including 67,840
   functions, 412 imports, and 26,769 defined strings.
+- `reverse/reconstruction-manifest.csv` counts only functions with a raw export,
+  buildable C/C++ ownership, and runnable evidence. `check-decomp-coverage.ps1` validates
+  that ledger against the complete inventory and fails closed under `-RequireComplete`.
 - 761 engine class registrations recovered into a portable ID/name table.
 - Binary GBX v6 preamble, user-data chunks, external-reference tables, body metadata,
   recovered class-parent relationships, and LZO1X/raw body decoding; headers and bodies
@@ -53,32 +58,49 @@ replays, controlability, and source-proven unlock rules remain recovery work.
   trigger instances in total. Animated Bink sign materials are deliberately left
   unbound until video decoding exists; they no longer discard otherwise valid geometry.
 - Packed `CPlugSurfaceGeom` data builds an indexed world collision scene with 98,189
-  instanced vertices, 529,392 indices (176,464 triangles), and 364 occupied grid cells.
+  instanced vertices, 528,984 indices (176,328 triangles), and 359 occupied grid cells.
+  Per-surface local material tables are kept distinct, external `CPlugMaterial`
+  references resolve to their numeric surface IDs, and the 136 triangles authored as
+  `NotCollidable` (surface 28) are omitted before grid insertion.
   Portable ground and wall-contact queries feed deterministic, substepped vehicle
   motion, steering, gravity/landing, respawn, and validated saved state. Separate
   two-sided trigger meshes drive ordered checkpoints, finishes, lap counts, race time,
   and `NoRespawn` behavior without entering physical collision.
+- The legacy Stadium vehicle-tuning graph parses all 30 records and selects original
+  tuning `20juin2006`. Its force curves, speed limits, steering radius, gravity, drag,
+  braking, and slowdown values drive the deterministic portable simulation.
 - The seven-mesh Stadium car low LOD is parsed from the original packed solid at runtime
   (3,506 vertices and 10,875 indices), textured from its three user-deployed images, and
-  follows the simulated vehicle pose in the GLES scene.
+  follows the simulated vehicle pose and road normal in the GLES scene. The two recovered
+  front-wheel meshes visibly steer around their source pivots.
+- The ordinary `CGameControlCameraTrackManiaRace3` path now owns the Android chase view:
+  source reset geometry, signed-speed response curve, angle-aware spherical direction/up
+  follow, distance spring, and vehicle-up view basis are shared portable code rather than
+  renderer-tuned constants.
 - The original LED bitmap-font atlas renders the live race timer, ordered checkpoint
-  and lap counts, plus a native `MAP 01/65` selector with personal-best and author times.
+  and lap counts, numeric km/h speed, plus a native `MAP 01/65` selector with
+  personal-best and author times.
   Selection and best records persist atomically in scoped app storage. No unlock
   thresholds are guessed: all 65 source-ordered maps remain selectable.
 - Portable image decoding covers TGA (raw/RLE) and DDS top mips in BC1/DXT1,
   BC2/DXT3, BC3/DXT5, RGB(A), luminance, and alpha layouts. Decoded reference-image
   hashes match an independent decoder byte-for-byte.
 - Portable input state and an Android GameActivity adapter cover touch, keyboard, and
-  gamepad actions. Focus/lifecycle transitions release held input and preserve the
-  current vehicle state.
+  gamepad actions. Four visible multi-touch buttons put left/right on the left and
+  forward/reverse on the right. Focus/lifecycle transitions release held input and
+  preserve the current vehicle state.
 - A lock-free stereo frame queue feeds low-latency AAudio output. Pause/resume closes
   and reopens the stream without terminating the process. Portable RIFF PCM16 decode,
-  mono expansion, and linear resampling play the original checkpoint and finish WAVs.
+  mono expansion, and linear resampling play the original 3/2/1/Go, checkpoint, and
+  finish WAVs. The executable-proven 2.5-second start clock locks simulation and race
+  time until Go, partitions the three countdown phases at 834/1,667 ms, and keeps Go
+  visible for 500 ms.
 - Native Android builds for `arm64-v8a` and `x86_64`; the ARM64 ELF uses 16 KiB load
   alignment (as does x86_64), the APK passes 16 KiB zip alignment checks, and both have been
   smoke-tested on an Android 15/API 35 emulator.
-- Fourteen portable unit tests cover formats, crypto, VFS, images, input/audio,
-  challenge/block data, track collision, and vehicle simulation.
+- Seventeen portable unit tests cover formats, crypto, VFS, images, input/audio,
+  challenge/block data, recovered legacy string views, race start, track collision,
+  and vehicle simulation.
 
 ## Build
 
@@ -104,34 +126,46 @@ all archive preambles and indexes, five real extraction/texture probes, parser-d
 cipher reseeds, material/bitmap chains, high-detail MIP selection, packed visual and
 collision hashes, A01/C11 scene totals, and the packed aliases used by the campaign.
 
-## Android content probe
+## Install on Android
 
-The APK deliberately contains no original game assets. With an API 35 emulator or
-device connected, deploy the minimum user-owned reference files and launch the app:
+The APK deliberately contains no original game assets. Copy the original
+`TmNationsForever` folder to a normal user-visible folder on the device, for example
+`Download/TmNationsForever`. Install and launch the APK, tap **Select game folder**, and
+choose that folder. The app imports `Packs` and `GameData` into its private storage and
+then starts the native game. Do not copy files into `Android/data`; Android 15 can leave
+such manually copied files inaccessible to the app.
+
+For a connected development target, this stages the minimum current runtime set in
+`Download/TmNationsForever`:
 
 ```powershell
-./scripts/deploy-reference-data.ps1 -Serial emulator-5554
 ./scripts/build-android.ps1
+./scripts/deploy-reference-data.ps1 -Serial emulator-5554
 ```
 
-The script copies the required user-owned packs, campaign container, all 65 challenges,
-the exact 69-file campaign/car/HUD/audio runtime set, and two race-event WAVs to the app's
-scoped external data directory. The native app mounts the archives, joins the campaign by
-UID, builds the selected scene/collision, and spawns at its decoded start transform. Use
-WASD or the D-pad to drive and `R`/gamepad Y to respawn. Press `P`/Menu/gamepad Start, or
+The script stages the required user-owned packs, campaign container, all 65 challenges,
+and the exact 73-file campaign/car/HUD/audio runtime set, including six race-event WAVs.
+Select the staged folder on first launch. The native app mounts the archives, joins the
+campaign by UID, builds the selected scene/collision, and spawns at its decoded start transform. Use
+the visible left/right buttons on the left and forward/reverse buttons on the right,
+or use WASD/the D-pad to drive; `R`/gamepad Y respawns. Press `P`/Menu/gamepad Start, or
 tap the `M` in the upper-left corner, to open the map selector; left/right changes maps
-and Enter/gamepad A or a center-screen tap loads one. Touch steers horizontally while
-driving; the upper and lower halves provide throttle and brake.
+and Enter/gamepad A or a center-screen tap loads one. A completed race advances to the
+next campaign map after a short result pause.
 
 ## Reverse engineering
 
 ```powershell
 ./scripts/analyze.ps1
+./scripts/decompile.ps1 -Missing -Limit 500
+./scripts/check-decomp-coverage.ps1
 ```
 
 This imports the exact reference executable into a local Ghidra project and exports
-machine-readable function, string, and class-registration inventories. See
-`docs/reverse-engineering.md` and `docs/architecture.md` for scope and sequencing.
+machine-readable function, string, and class-registration inventories. The decompiler
+command resumes from the next missing raw function; the coverage command reports raw and
+verified reconstructed totals separately. See `docs/reverse-engineering.md` and
+`docs/architecture.md` for scope and sequencing.
 
 No original executable, archive, or copyrighted game asset is copied into the source
 tree or APK by the current build.

@@ -25,6 +25,11 @@ struct AudioClipDecodeResult final {
 [[nodiscard]] AudioClipDecodeResult decodePcm16Wav(std::span<const std::byte> bytes,
                                                    std::int32_t outputSampleRate);
 
+// Samples a whole-clip loop with linear pitch interpolation and advances its
+// callback-owned cursor.
+[[nodiscard]] StereoFrame sampleAudioLoop(std::span<const StereoFrame> frames, double& cursor,
+                                          float pitch) noexcept;
+
 // Fixed-capacity single-producer/single-consumer queue. The simulation thread
 // writes decoded/mixed frames and the platform audio callback reads them
 // without allocation or locks.
