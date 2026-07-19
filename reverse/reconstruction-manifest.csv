@@ -1,0 +1,44 @@
+address,source,evidence,notes
+00401000,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Nullable narrow string pointer and length view
+00401030,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Assign nullable narrow string through explicit pointer and length
+004010a0,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Nullable UTF-16 string pointer and length view
+004010f0,core/include/tmnf/legacy/localization.hpp,tests/legacy_string_view_test.cpp,Resolve UTF-16 text through the process-global translation catalog
+00401110,core/include/tmnf/legacy/archive.hpp,tests/legacy_string_view_test.cpp,Scoped CSystemArchiveNod write with fixed mode 7
+004011a0,core/include/tmnf/legacy/archive.hpp,tests/legacy_string_view_test.cpp,Scoped CSystemArchiveNod four-argument read
+00401450,core/include/tmnf/legacy/application.hpp,tests/legacy_string_view_test.cpp,CGbxGame optional command-line argument dispatch
+00401490,core/include/tmnf/legacy/application.hpp,tests/legacy_string_view_test.cpp,CGbxGame StopApp delegate or platform fallback
+00401550,core/include/tmnf/legacy/intrusive_ptr.hpp,tests/legacy_string_view_test.cpp,Release a non-null intrusive reference
+00401560,core/include/tmnf/legacy/intrusive_ptr.hpp,tests/legacy_string_view_test.cpp,Retain-before-release intrusive assignment
+004015c0,core/include/tmnf/legacy/intrusive_ptr.hpp,tests/legacy_string_view_test.cpp,Second release template instantiation
+004015d0,core/include/tmnf/legacy/intrusive_ptr.hpp,tests/legacy_string_view_test.cpp,Second intrusive assignment template instantiation
+00401650,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Clear non-empty fixed narrow-string buffer in place
+004016f0,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Release narrow fast-string storage and restore its sentinel
+00401730,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Release UTF-16 fast-string storage and restore its sentinel
+00401770,core/include/tmnf/legacy/array.hpp,tests/legacy_string_view_test.cpp,Address a 32-bit element in engine array storage
+00401810,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Assign a length-first UTF-16 storage view into an owned string
+00401860,core/include/tmnf/legacy/math.hpp,tests/legacy_string_view_test.cpp,Initialize a zero-origin and supplied-vector pair
+00401a00,core/include/tmnf/legacy/application.hpp,tests/legacy_string_view_test.cpp,Set the pending CGbxGame argument only when its slot is empty
+00401a50,core/include/tmnf/legacy/application.hpp,tests/legacy_string_view_test.cpp,Ordered CGbxGame StopApp cleanup and delegated shutdown
+00401b20,core/include/tmnf/legacy/application.hpp,tests/legacy_string_view_test.cpp,Exact predicate for unnamed CGbxGame vslot 0x94
+00401b80,core/include/tmnf/legacy/application.hpp,tests/legacy_string_view_test.cpp,Forward one argument through CGbxApp GmNat2 fast callback instance
+00401bb0,core/include/tmnf/legacy/application.hpp,tests/legacy_string_view_test.cpp,Forward one argument through CGbxApp CFastStringInt fast callback instance
+00401bc0,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Release another narrow fast-string storage instantiation
+00401c00,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Release another UTF-16 fast-string storage instantiation
+00401c40,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Initialize narrow fast-string storage to its empty sentinel
+00401c60,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Release the common narrow fast-string storage instantiation
+00401ca0,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Construct a narrow fast string from a nullable C string
+00401d30,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Initialize UTF-16 fast-string storage to its empty sentinel
+00401d50,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Construct UTF-16 fast-string storage through the recovered narrow conversion path
+00401db0,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Release another UTF-16 fast-string storage instantiation
+00401df0,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Construct a UTF-16 fast string from a nullable pointer
+00452c20,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Assign explicit pointer and length with same-buffer no-op
+00455e20,core/include/tmnf/legacy/localization.hpp,tests/legacy_string_view_test.cpp,Remove a pipe-delimited gettext context prefix
+004560f0,core/include/tmnf/legacy/array.hpp,tests/legacy_string_view_test.cpp,Address a byte element in engine array storage
+00456200,core/include/tmnf/legacy/localization.hpp,tests/legacy_string_view_test.cpp,Open-addressed translation lookup with first-use accounting
+004565f0,core/include/tmnf/legacy/localization.hpp,tests/legacy_string_view_test.cpp,Resolve catalog translation and strip its context prefix
+00459050,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Decode the engine permissive null-terminated one-to-six-byte UTF-8 format
+004598b0,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Assign explicit UTF-16 pointer and length with same-buffer no-op
+0045a660,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Decode BOM-marked narrow storage and append truncated UTF-16 code units
+0045a9d0,core/include/tmnf/legacy/string_view.hpp,tests/legacy_string_view_test.cpp,Select BOM UTF-8 decoding or unsigned byte widening into UTF-16
+00465680,core/include/tmnf/legacy/localization.hpp,tests/legacy_string_view_test.cpp,GNU gettext UTF-16 hash with optional length
+00715310,core/include/tmnf/gameplay/race_start.hpp,tests/race_start_test.cpp,Single-player countdown duration returns 2500 ms

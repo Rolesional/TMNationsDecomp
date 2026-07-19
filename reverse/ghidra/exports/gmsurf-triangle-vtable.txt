@@ -1,0 +1,4 @@
+vftable=GmSurfTriangle::vftable
+address=00d378b0
+00 +0x00 00b083f0 FUN_00b083f0
+entries=1

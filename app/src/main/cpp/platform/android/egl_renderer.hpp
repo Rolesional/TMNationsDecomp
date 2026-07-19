@@ -1,9 +1,12 @@
 #pragma once
 
 #include "content/reference_probe.hpp"
+#include "tmnf/gameplay/race3_camera.hpp"
+#include "tmnf/gameplay/race_start.hpp"
 
 #include <EGL/egl.h>
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -27,10 +30,15 @@ public:
   void setHudFont(tmnf::image::RgbaImage image);
   void setScene(tmnf::content::TrackScene scene, tmnf::gbx::SolidModel vehicleSolid,
                 tmnf::content::SolidMaterialSet vehicleMaterials);
-  void setVehiclePose(tmnf::gbx::Float3 position, float heading) noexcept;
-  void setRaceHud(float raceTimeSeconds, std::uint32_t checkpointCount,
+  void setVehiclePose(tmnf::gbx::Float3 position,
+                       std::array<float, 4> orientationWxyz, float frontWheelSteeringRadians,
+                       float signedForwardSpeedMetersPerSecond,
+                       bool resetCamera = false) noexcept;
+  void setRaceHud(float raceTimeSeconds, float speedMetersPerSecond,
+                  std::uint32_t checkpointCount,
                   std::uint32_t checkpointTotal, std::uint32_t completedLaps,
                   std::uint32_t lapTotal, bool finished) noexcept;
+  void setRaceStartPhase(tmnf::gameplay::RaceStartPhase phase) noexcept;
   void setMapSelector(std::uint32_t mapIndex, std::uint32_t mapTotal,
                       std::int32_t personalBestMilliseconds, std::int32_t authorMilliseconds,
                       bool visible) noexcept;
@@ -44,6 +52,8 @@ private:
     int firstIndex = 0;
     int indexCount = 0;
     unsigned int texture = 0;
+    bool frontWheel = false;
+    tmnf::gbx::Float3 pivot;
   };
 
   bool createImageResources();
@@ -68,12 +78,15 @@ private:
   unsigned int hudVertexArray_ = 0;
   unsigned int hudVertexBuffer_ = 0;
   float hudRaceTimeSeconds_ = 0.0F;
+  float hudSpeedMetersPerSecond_ = 0.0F;
   std::uint32_t hudCheckpointCount_ = 0;
   std::uint32_t hudCheckpointTotal_ = 0;
   std::uint32_t hudCompletedLaps_ = 0;
   std::uint32_t hudLapTotal_ = 1;
   bool hudFinished_ = false;
   bool hudVisible_ = false;
+  tmnf::gameplay::RaceStartPhase hudRaceStartPhase_ =
+      tmnf::gameplay::RaceStartPhase::Hidden;
   std::uint32_t selectorMapIndex_ = 0;
   std::uint32_t selectorMapTotal_ = 0;
   std::int32_t selectorPersonalBestMilliseconds_ = -1;
@@ -100,8 +113,12 @@ private:
   tmnf::gbx::Float3 meshWorldCenter_;
   float meshWorldInverseExtent_ = 1.0F;
   tmnf::gbx::Float3 vehiclePosition_;
-  float vehicleHeading_ = 0.0F;
+  std::array<float, 4> vehicleOrientationWxyz_{1.0F, 0.0F, 0.0F, 0.0F};
+  float frontWheelSteeringRadians_ = 0.0F;
+  float vehicleForwardSpeedMetersPerSecond_ = 0.0F;
   bool vehicleVisible_ = false;
+  tmnf::gameplay::Race3Camera camera_;
+  bool cameraResetRequested_ = true;
   float imageOffsetX_ = 0.0F;
   float imageOffsetY_ = 0.0F;
 };

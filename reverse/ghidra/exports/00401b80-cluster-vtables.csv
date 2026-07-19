@@ -1,0 +1,3 @@
+targetAddress,vftableAddress,qualifiedName,slotIndex,slotOffset,functionName
+"00401b80","00c74ce8","CFastCallbackInstance1P<CGbxApp,GmNat2_const&>::vftable",0,"0x0","FUN_00401b80"
+"00401bb0","00c74cf0","CFastCallbackInstance1P<CGbxApp,CFastStringInt_const&>::vftable",0,"0x0","FUN_00401bb0"

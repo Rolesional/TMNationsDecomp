@@ -1,12 +1,15 @@
 #include "tmnf/content/materials.hpp"
 
 #include "tmnf/gbx/document.hpp"
+#include "tmnf/gbx/span_input.hpp"
 #include "tmnf/image/dds.hpp"
 #include "tmnf/image/tga.hpp"
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cctype>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -23,6 +26,12 @@ SolidMaterialResolveResult failed(std::string message) {
 
 SolidMaterialBatchResolveResult batchFailed(std::string message) {
   SolidMaterialBatchResolveResult result;
+  result.error = std::move(message);
+  return result;
+}
+
+SolidSurfaceMaterialResolveResult surfaceFailed(std::string message) {
+  SolidSurfaceMaterialResolveResult result;
   result.error = std::move(message);
   return result;
 }
@@ -48,6 +57,55 @@ std::string materialDocumentPath(const std::string_view reference) {
     return "Media\\" + std::string(reference);
   }
   return "Media\\Material\\" + std::string(reference);
+}
+
+struct MaterialSurfaceIdResult final {
+  std::int16_t surfaceId = -1;
+  std::string error;
+
+  explicit operator bool() const noexcept { return error.empty(); }
+};
+
+MaterialSurfaceIdResult readMaterialSurfaceId(const pak::VirtualFileSystem& vfs,
+                                              const std::string_view reference) {
+  constexpr std::uint32_t kCPlugMaterial = 0x09079000U;
+  constexpr std::array<std::byte, 4> kSurfaceIdChunk{
+      std::byte{0x0e}, std::byte{0x90}, std::byte{0x07}, std::byte{0x09}};
+  const std::string path = materialDocumentPath(reference);
+  pak::VfsReadResult bytes = vfs.readFile(path);
+  if (!bytes) {
+    return {.error = "unable to read " + path + ": " + bytes.error};
+  }
+  gbx::SpanInput input(bytes.data);
+  const gbx::DocumentProbeResult probed = gbx::probeDocument(input, false);
+  if (!probed) {
+    return {.error = "unable to probe " + path + ": " + probed.error};
+  }
+  if (probed.document.header.classId != kCPlugMaterial ||
+      probed.document.header.bodyCompression != 'U') {
+    return {.error = "surface material is not an uncompressed CPlugMaterial: " + path};
+  }
+
+  std::optional<std::int16_t> surfaceId;
+  const std::span<const std::byte> data(bytes.data);
+  for (std::size_t offset = probed.document.bodyDataOffset;
+       offset + kSurfaceIdChunk.size() + sizeof(std::int16_t) <= data.size(); ++offset) {
+    if (!std::equal(kSurfaceIdChunk.begin(), kSurfaceIdChunk.end(), data.begin() + offset)) {
+      continue;
+    }
+    const std::uint16_t encoded =
+        static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(data[offset + 4U])) |
+        static_cast<std::uint16_t>(std::to_integer<std::uint8_t>(data[offset + 5U]) << 8U);
+    const std::int16_t candidate = std::bit_cast<std::int16_t>(encoded);
+    if (candidate < 0 || candidate > 30 || surfaceId.has_value()) {
+      return {.error = "invalid CPlugMaterial surface-ID chunk in " + path};
+    }
+    surfaceId = candidate;
+  }
+  if (!surfaceId.has_value()) {
+    return {.error = "CPlugMaterial surface-ID chunk is unavailable in " + path};
+  }
+  return {.surfaceId = *surfaceId, .error = {}};
 }
 
 struct ExternalPathsResult final {
@@ -276,6 +334,38 @@ resolveSolidMaterialBatch(const std::span<const gbx::SolidModel* const> solids,
     }
   }
   return result;
+}
+
+SolidSurfaceMaterialResolveResult
+resolveSolidSurfaceMaterials(const std::span<gbx::SolidModel* const> solids,
+                             const pak::VirtualFileSystem& vfs) {
+  std::unordered_map<std::string, std::int16_t> cache;
+  for (gbx::SolidModel* const solid : solids) {
+    if (solid == nullptr) {
+      return surfaceFailed("surface-material batch contains a null SolidModel");
+    }
+    if (solid->surfaceMaterials.size() != solid->surfaceMaterialReferences.size()) {
+      return surfaceFailed("CPlugSurface material IDs and references are inconsistent");
+    }
+    for (std::size_t index = 0; index < solid->surfaceMaterials.size(); ++index) {
+      const std::string& reference = solid->surfaceMaterialReferences[index];
+      if (reference.empty()) {
+        continue;
+      }
+      const std::string cacheKey = pak::normalizeArchivePath(reference);
+      if (const auto existing = cache.find(cacheKey); existing != cache.end()) {
+        solid->surfaceMaterials[index] = existing->second;
+        continue;
+      }
+      const MaterialSurfaceIdResult resolved = readMaterialSurfaceId(vfs, reference);
+      if (!resolved) {
+        return surfaceFailed(resolved.error);
+      }
+      solid->surfaceMaterials[index] = resolved.surfaceId;
+      cache.emplace(cacheKey, resolved.surfaceId);
+    }
+  }
+  return {};
 }
 
 } // namespace tmnf::content

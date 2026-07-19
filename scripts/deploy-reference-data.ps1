@@ -7,7 +7,8 @@ $ErrorActionPreference = 'Stop'
 
 $adb = Join-Path $env:ANDROID_HOME 'platform-tools\adb.exe'
 $sourceRoot = Join-Path $WorkspaceRoot 'TmNationsForever\Packs'
-$destination = '/sdcard/Android/data/com.tmnf.port/files/Packs'
+$importRoot = '/sdcard/Download/TmNationsForever'
+$destination = "$importRoot/Packs"
 
 & $adb -s $Serial shell mkdir -p $destination
 if ($LASTEXITCODE -ne 0) {
@@ -20,7 +21,7 @@ foreach ($name in @('packlist.dat', 'Resource.pak', 'Stadium.pak')) {
     }
 }
 $gameDataSourceRoot = Join-Path $WorkspaceRoot 'TmNationsForever\GameData'
-$gameDataDestination = '/sdcard/Android/data/com.tmnf.port/files/GameData'
+$gameDataDestination = "$importRoot/GameData"
 foreach ($relativePath in @(
     'Interface\Advertising\Ad8x1A.dds',
     'Interface\Advertising\Ad8x1B.dds',
@@ -90,7 +91,17 @@ foreach ($relativePath in @(
     'Vehicles\Media\Texture\Image\StadiumCarPilot.dds',
     'Interface\Media\Font\Led_Textures\Led_00.dds',
     'Interface\Media\Audio\Sound\Wav\RaceCheckPoint.wav',
-    'Interface\Media\Audio\Sound\Wav\RaceFinish.wav'
+    'Interface\Media\Audio\Sound\Wav\RaceFinish.wav',
+    'Interface\Media\Audio\Sound\Wav\Race1.wav',
+    'Interface\Media\Audio\Sound\Wav\Race2.wav',
+    'Interface\Media\Audio\Sound\Wav\Race3.wav',
+    'Interface\Media\Audio\Sound\Wav\RaceGo.wav',
+    'Vehicles\Media\Audio\Sound\WavData\SportCarEngineIdle.wav',
+    'Vehicles\Media\Audio\Sound\WavData\SportCarEngineLow.wav',
+    'Vehicles\Media\Audio\Sound\WavData\SportCarEngineMid.wav',
+    'Vehicles\Media\Audio\Sound\WavData\SportCarEngineFast.wav',
+    'Vehicles\Media\Audio\Sound\WavData\SportCarEngineRev.wav',
+    'Vehicles\Media\Audio\Sound\WavData\SportCarEngineRev2.wav'
 )) {
     $source = Join-Path $gameDataSourceRoot $relativePath
     $deviceRelativePath = $relativePath.Replace('\', '/')
@@ -125,4 +136,5 @@ foreach ($file in $campaignFiles) {
         throw "Unable to deploy $relativePath to $Serial"
     }
 }
-Write-Output "Reference Packs, 69 campaign/runtime assets, and 65 ordered Nations challenges deployed to ${Serial}"
+Write-Output "Reference Packs, 79 campaign/runtime assets, and 65 ordered Nations challenges staged in Download/TmNationsForever on ${Serial}"
+Write-Output "Launch the app, tap Select game folder, and choose Download/TmNationsForever."

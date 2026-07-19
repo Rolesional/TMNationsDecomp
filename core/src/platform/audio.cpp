@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -131,6 +132,33 @@ AudioClipDecodeResult decodePcm16Wav(const std::span<const std::byte> bytes,
     };
   }
   return result;
+}
+
+StereoFrame sampleAudioLoop(const std::span<const StereoFrame> frames, double& cursor,
+                            const float pitch) noexcept {
+  if (frames.empty() || !std::isfinite(cursor) || !std::isfinite(pitch) || pitch <= 0.0F) {
+    cursor = 0.0;
+    return {};
+  }
+  const double frameCount = static_cast<double>(frames.size());
+  if (cursor < 0.0 || cursor >= frameCount) {
+    cursor = std::fmod(std::max(cursor, 0.0), frameCount);
+  }
+  const std::size_t first = static_cast<std::size_t>(cursor);
+  const std::size_t second = first + 1U == frames.size() ? 0U : first + 1U;
+  const float fraction = static_cast<float>(cursor - static_cast<double>(first));
+  const StereoFrame sample{
+      std::lerp(frames[first].left, frames[second].left, fraction),
+      std::lerp(frames[first].right, frames[second].right, fraction),
+  };
+  cursor += static_cast<double>(pitch);
+  if (cursor >= frameCount) {
+    cursor -= frameCount;
+    if (cursor >= frameCount) {
+      cursor = std::fmod(cursor, frameCount);
+    }
+  }
+  return sample;
 }
 
 AudioRingBuffer::AudioRingBuffer(const std::size_t capacityFrames)

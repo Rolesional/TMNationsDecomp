@@ -89,6 +89,12 @@ const BlockSolidAsset* selectSolid(const std::span<const BlockSolidAsset> solids
   return candidates.front();
 }
 
+std::array<std::int32_t, 2> blockFootprint(const BlockAssetGraph& graph,
+                                           const gbx::ChallengeBlock& block) {
+  return (block.flags & kChallengeBlockGroundFlag) != 0U ? graph.groundFootprint
+                                                         : graph.airFootprint;
+}
+
 } // namespace
 
 TrackSceneBuildResult buildTrackScene(gbx::Challenge challenge, const pak::VirtualFileSystem& vfs,
@@ -129,6 +135,7 @@ TrackSceneBuildResult buildTrackScene(gbx::Challenge challenge, const pak::Virtu
       graph = graphCache.emplace(block.name, std::move(resolved.graph)).first;
     }
 
+    const std::array<std::int32_t, 2> footprint = blockFootprint(graph->second, block);
     if (!graph->second.triggerSolids.empty()) {
       const BlockSolidAsset* const selectedTrigger =
           selectSolid(graph->second.triggerSolids, graph->second.blockName, block);
@@ -144,7 +151,7 @@ TrackSceneBuildResult buildTrackScene(gbx::Challenge challenge, const pak::Virtu
         return failed("unable to parse " + selectedTrigger->logicalPath + ": " + parsed.error);
       }
       result.scene.triggers.push_back(
-          {blockIndex, selectedTrigger->logicalPath, std::move(parsed.solid)});
+          {blockIndex, selectedTrigger->logicalPath, std::move(parsed.solid), footprint});
     }
     if (graph->second.solids.empty()) {
       ++result.scene.invisibleBlockCount;
@@ -176,13 +183,24 @@ TrackSceneBuildResult buildTrackScene(gbx::Challenge challenge, const pak::Virtu
       result.scene.models.push_back(std::move(trackModel));
       model = modelCache.emplace(modelKey, modelIndex).first;
     }
-    result.scene.placements.push_back({blockIndex, model->second});
+    result.scene.placements.push_back({blockIndex, model->second, footprint});
+  }
+
+  std::vector<gbx::SolidModel*> mutableSolids;
+  mutableSolids.reserve(result.scene.models.size());
+  for (TrackModel& model : result.scene.models) {
+    mutableSolids.push_back(&model.solid);
+  }
+  const SolidSurfaceMaterialResolveResult surfaces =
+      resolveSolidSurfaceMaterials(std::span<gbx::SolidModel* const>(mutableSolids), vfs);
+  if (!surfaces) {
+    return failed("unable to resolve track collision materials: " + surfaces.error);
   }
 
   std::vector<const gbx::SolidModel*> solids;
-  solids.reserve(result.scene.models.size());
-  for (const TrackModel& model : result.scene.models) {
-    solids.push_back(&model.solid);
+  solids.reserve(mutableSolids.size());
+  for (const gbx::SolidModel* const solid : mutableSolids) {
+    solids.push_back(solid);
   }
   SolidMaterialBatchResolveResult materials = resolveSolidMaterialBatch(
       std::span<const gbx::SolidModel* const>(solids), vfs, looseFileReader);

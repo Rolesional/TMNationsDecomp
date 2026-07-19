@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,7 @@ enum class SolidCollisionType {
 };
 
 struct SolidCollisionShape final {
+  std::string treeName;
   SolidCollisionType type = SolidCollisionType::Mesh;
   std::int32_t archiveVersion = 0;
   std::array<float, 12> transform{1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
@@ -55,13 +57,27 @@ struct SolidCollisionShape final {
   std::vector<Float3> positions;
   std::vector<std::uint32_t> indices;
   std::vector<std::int16_t> triangleSurfaceIndices;
+  // Local material indices in this shape address this [offset,count] range in
+  // SolidModel::surfaceMaterials. Synthetic fixtures may leave it unset to
+  // address the complete table.
+  std::optional<std::array<std::size_t, 2>> surfaceMaterialRange;
+};
+
+struct SolidTreeTransform final {
+  std::string name;
+  std::array<float, 12> transform{1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F,
+                                  0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F};
 };
 
 struct SolidModel final {
   std::string rootTreeName;
   std::vector<SolidVisual> visuals;
   std::vector<SolidCollisionShape> collisionShapes;
+  std::vector<SolidTreeTransform> treeTransforms;
   std::vector<std::int16_t> surfaceMaterials;
+  // One external CPlugMaterial path per surfaceMaterials entry; empty when the
+  // CPlugSurface stores an inline numeric material ID.
+  std::vector<std::string> surfaceMaterialReferences;
   std::size_t parsedNodeCount = 0;
   std::size_t externalNodeCount = 0;
 };

@@ -6,6 +6,7 @@
 #include "tmnf/gbx/solid.hpp"
 #include "tmnf/pak/vfs.hpp"
 
+#include <array>
 #include <cstddef>
 #include <string>
 #include <vector>
@@ -22,12 +23,14 @@ struct TrackModel final {
 struct TrackPlacement final {
   std::size_t blockIndex = 0;
   std::size_t modelIndex = 0;
+  std::array<std::int32_t, 2> footprint{1, 1};
 };
 
 struct TrackTrigger final {
   std::size_t blockIndex = 0;
   std::string logicalPath;
   gbx::SolidModel solid;
+  std::array<std::int32_t, 2> footprint{1, 1};
 };
 
 struct TrackBlockDefinition final {

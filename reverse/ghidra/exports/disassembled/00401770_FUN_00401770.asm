@@ -1,0 +1,4 @@
+00401770  MOV EAX,dword ptr [ECX + 0x4]
+00401773  MOV ECX,dword ptr [ESP + 0x4]
+00401777  LEA EAX,[EAX + ECX*0x4]
+0040177a  RET 0x4

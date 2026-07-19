@@ -3,6 +3,7 @@
 #include "platform/android/egl_renderer.hpp"
 #include "platform/android/input_adapter.hpp"
 #include "tmnf/content/track_collision.hpp"
+#include "tmnf/gameplay/race_start.hpp"
 #include "tmnf/gameplay/vehicle.hpp"
 #include "tmnf/platform/input.hpp"
 
@@ -23,6 +24,13 @@
 
 namespace {
 
+#if defined(NDEBUG)
+constexpr float kVehicleLogIntervalSeconds = 0.5F;
+#else
+constexpr float kVehicleLogIntervalSeconds = 1.0F / 60.0F;
+#endif
+constexpr float kDryEngineSpeedInput = -1.0F;
+
 class NativeEngine final {
 public:
   explicit NativeEngine(android_app* app) : app_(app), inputAdapter_(input_) {
@@ -35,11 +43,16 @@ public:
       std::memcpy(&*restoredState, app_->savedState, sizeof(*restoredState));
     }
 
-    if (app_->activity->externalDataPath != nullptr) {
-      progressPath_ =
-          std::filesystem::path(app_->activity->externalDataPath) / "nations-progress.txt";
+    const char* dataPath = app_->activity->internalDataPath != nullptr
+                               ? app_->activity->internalDataPath
+                               : app_->activity->externalDataPath;
+    if (dataPath != nullptr) {
+      runtimeDataRoot_ = dataPath;
+      __android_log_print(ANDROID_LOG_INFO, "TMNF", "Runtime data root: %s",
+                          runtimeDataRoot_.c_str());
+      progressPath_ = std::filesystem::path(runtimeDataRoot_) / "nations-progress.txt";
     }
-    campaign_ = tmnf::content::loadReferenceCampaign(app_->activity->externalDataPath);
+    campaign_ = tmnf::content::loadReferenceCampaign(runtimeDataRoot_.c_str());
     if (!campaign_) {
       __android_log_print(ANDROID_LOG_WARN, "TMNF", "Campaign catalog unavailable: %s",
                           campaign_.error.c_str());
@@ -56,12 +69,14 @@ public:
     }
     loadProgress();
     std::optional<tmnf::gameplay::VehicleState> restoredVehicle;
+    std::optional<tmnf::gameplay::RaceStartState> restoredRaceStart;
     if (restoredState.has_value() && restoredState->mapIndex < campaign_.maps.size()) {
       currentMapIndex_ = restoredState->mapIndex;
       restoredVehicle = restoredState->vehicle;
+      restoredRaceStart = restoredState->raceStart;
     }
     pendingMapIndex_ = currentMapIndex_;
-    if (!loadMap(currentMapIndex_, restoredVehicle)) {
+    if (!loadMap(currentMapIndex_, restoredVehicle, restoredRaceStart)) {
       __android_log_print(ANDROID_LOG_WARN, "TMNF", "Initial campaign map unavailable");
     }
   }
@@ -111,6 +126,7 @@ private:
   struct SavedState final {
     std::uint32_t mapIndex = 0;
     tmnf::gameplay::VehicleState vehicle;
+    tmnf::gameplay::RaceStartState raceStart;
   };
 
   void loadProgress() {
@@ -202,13 +218,15 @@ private:
     updateSelectorHud();
   }
 
-  bool loadMap(const std::size_t index,
-               const std::optional<tmnf::gameplay::VehicleState> restoredVehicle = std::nullopt) {
+  bool loadMap(
+      const std::size_t index,
+      const std::optional<tmnf::gameplay::VehicleState> restoredVehicle = std::nullopt,
+      const std::optional<tmnf::gameplay::RaceStartState> restoredRaceStart = std::nullopt) {
     if (index >= campaign_.maps.size()) {
       return false;
     }
     tmnf::content::ReferenceProbeResult probe = tmnf::content::loadReferenceContent(
-        app_->activity->externalDataPath, campaign_.maps[index].relativePath);
+        runtimeDataRoot_.c_str(), campaign_.maps[index].relativePath);
     if (!probe) {
       __android_log_print(ANDROID_LOG_WARN, "TMNF", "Campaign map unavailable: %s",
                           probe.error.c_str());
@@ -223,15 +241,24 @@ private:
     }
     collision_ = std::move(collision.collision);
     vehicle_ = {};
+    const tmnf::gbx::VehicleTuning* const activeTuning = probe.vehicleTunings.active();
+    if (activeTuning == nullptr) {
+      __android_log_print(ANDROID_LOG_ERROR, "TMNF", "StadiumCar has no active tuning");
+      return false;
+    }
     const tmnf::gameplay::VehicleInitializeResult vehicleInitialized =
-        vehicle_.initialize(probe.scene, collision_);
+        vehicle_.initialize(probe.scene, collision_, *activeTuning, &probe.vehicleSolid);
     if (!vehicleInitialized) {
       __android_log_print(ANDROID_LOG_ERROR, "TMNF", "Vehicle initialization failed: %s",
                           vehicleInitialized.error.c_str());
       return false;
     }
-    if (restoredVehicle.has_value()) {
-      (void)vehicle_.restore(*restoredVehicle);
+    raceStart_.reset();
+    if (restoredVehicle.has_value() != restoredRaceStart.has_value() ||
+        (restoredRaceStart.has_value() &&
+         (!raceStart_.restore(*restoredRaceStart) || !vehicle_.restore(*restoredVehicle)))) {
+      raceStart_.reset();
+      __android_log_print(ANDROID_LOG_WARN, "TMNF", "Discarded invalid saved race state");
     }
 
     tmnf::content::ReferenceCampaignMap& selectedMap = campaign_.maps[index];
@@ -246,8 +273,13 @@ private:
                         probe.scene.challenge.mapName.c_str(), probe.scene.challenge.blocks.size(),
                         probe.scene.placements.size(), probe.scene.models.size(),
                         probe.scene.textures.size(), probe.image.width, probe.image.height);
+    audio_.setEngine(std::move(probe.soundEngine), std::move(probe.engineSounds));
     audio_.setSound(tmnf::android::RaceSound::Checkpoint, std::move(probe.checkpointSound));
     audio_.setSound(tmnf::android::RaceSound::Finish, std::move(probe.finishSound));
+    audio_.setSound(tmnf::android::RaceSound::Countdown1, std::move(probe.countdown1Sound));
+    audio_.setSound(tmnf::android::RaceSound::Countdown2, std::move(probe.countdown2Sound));
+    audio_.setSound(tmnf::android::RaceSound::Countdown3, std::move(probe.countdown3Sound));
+    audio_.setSound(tmnf::android::RaceSound::Go, std::move(probe.goSound));
     renderer_.setImage(std::move(probe.image));
     renderer_.setHudFont(std::move(probe.hudFont));
     renderer_.setScene(std::move(probe.scene), std::move(probe.vehicleSolid),
@@ -256,12 +288,15 @@ private:
     currentMapIndex_ = index;
     pendingMapIndex_ = index;
     selectorVisible_ = false;
+    finishAdvanceSeconds_ = 0.0F;
     lastVehicleLogSeconds_ = -1.0F;
     const tmnf::gameplay::VehicleState& vehicle = vehicle_.state();
-    renderer_.setVehiclePose(vehicle.position, vehicle.heading);
-    renderer_.setRaceHud(vehicle.raceTimeSeconds, vehicle.checkpointCount,
+    audio_.setEngineState(kDryEngineSpeedInput, vehicle.engineRpm, 0.0F);
+    renderer_.setVehiclePose(vehicle.position, vehicle.orientationWxyz, 0.0F, 0.0F, true);
+    renderer_.setRaceHud(vehicle.raceTimeSeconds, vehicle.speed, vehicle.checkpointCount,
                          static_cast<std::uint32_t>(vehicle_.checkpointTotal()),
                          vehicle.completedLaps, vehicle_.lapTotal(), vehicle.finished);
+    renderer_.setRaceStartPhase(raceStart_.current().phase);
     updateSelectorHud();
     saveProgress();
 
@@ -326,15 +361,20 @@ private:
     case APP_CMD_GAINED_FOCUS:
       focused_ = true;
       input_.setFocused(true);
+      if (resumed_) {
+        audio_.start();
+      }
       break;
     case APP_CMD_LOST_FOCUS:
       focused_ = false;
       input_.setFocused(false);
+      audio_.stop();
       break;
     case APP_CMD_SAVE_STATE: {
       auto* state = static_cast<SavedState*>(std::malloc(sizeof(SavedState)));
       if (state != nullptr) {
-        *state = SavedState{static_cast<std::uint32_t>(currentMapIndex_), vehicle_.state()};
+        *state = SavedState{static_cast<std::uint32_t>(currentMapIndex_), vehicle_.state(),
+                            raceStart_.state()};
         app_->savedState = state;
         app_->savedStateSize = sizeof(SavedState);
       }
@@ -358,6 +398,9 @@ private:
     if (input.wasPressed(InputAction::Menu) || (touchReleased && menuButton)) {
       selectorVisible_ = !selectorVisible_;
       pendingMapIndex_ = currentMapIndex_;
+      if (selectorVisible_) {
+        audio_.setEngineState(kDryEngineSpeedInput, 0.0F, 0.0F);
+      }
       updateSelectorHud();
       return;
     }
@@ -397,31 +440,63 @@ private:
     if (!vehicle_.initialized()) {
       return;
     }
+    bool resetCamera = false;
     if (input.wasPressed(InputAction::Respawn)) {
       vehicle_.reset();
+      finishAdvanceSeconds_ = 0.0F;
+      resetCamera = true;
       audio_.playTone(440.0F, 0.08F);
     }
+    if (vehicle_.state().finished) {
+      finishAdvanceSeconds_ += static_cast<float>(deltaSeconds);
+      if (finishAdvanceSeconds_ >= 2.0F && currentMapIndex_ + 1U < campaign_.maps.size()) {
+        const std::size_t nextMapIndex = currentMapIndex_ + 1U;
+        __android_log_print(ANDROID_LOG_INFO, "TMNF", "Advancing to campaign map %zu/%zu",
+                            nextMapIndex + 1U, campaign_.maps.size());
+        if (loadMap(nextMapIndex)) {
+          return;
+        }
+        finishAdvanceSeconds_ = 0.0F;
+      }
+    }
+    const tmnf::gameplay::RaceStartAdvance raceStart = raceStart_.advance(deltaSeconds);
+    renderer_.setRaceStartPhase(raceStart.phase);
+    if (raceStart.hasCue(tmnf::gameplay::RaceStartCue::Countdown3)) {
+      audio_.playSound(tmnf::android::RaceSound::Countdown3);
+    }
+    if (raceStart.hasCue(tmnf::gameplay::RaceStartCue::Countdown2)) {
+      audio_.playSound(tmnf::android::RaceSound::Countdown2);
+    }
+    if (raceStart.hasCue(tmnf::gameplay::RaceStartCue::Countdown1)) {
+      audio_.playSound(tmnf::android::RaceSound::Countdown1);
+    }
+    if (raceStart.hasCue(tmnf::gameplay::RaceStartCue::Go)) {
+      audio_.playSound(tmnf::android::RaceSound::Go);
+    }
     tmnf::gameplay::VehicleControl control;
-    control.steering = input.steering;
+    control.steering = -input.steering;
     if (std::abs(control.steering) < 0.001F) {
-      control.steering = static_cast<float>(input.isHeld(InputAction::SteerRight)) -
-                         static_cast<float>(input.isHeld(InputAction::SteerLeft));
+      control.steering = static_cast<float>(input.isHeld(InputAction::SteerLeft)) -
+                         static_cast<float>(input.isHeld(InputAction::SteerRight));
     }
     control.throttle =
         std::max(input.throttle, static_cast<float>(input.isHeld(InputAction::Accelerate)));
     control.brake = std::max(input.brake, static_cast<float>(input.isHeld(InputAction::Brake)));
     if (input.touchActive) {
-      control.steering = std::clamp(input.touchX * 1.4F, -1.0F, 1.0F);
+      control.steering = std::clamp(-input.touchX * 1.4F, -1.0F, 1.0F);
       control.throttle = std::clamp((input.touchY - 0.15F) / 0.85F, 0.0F, 1.0F);
       control.brake = std::clamp((-input.touchY - 0.15F) / 0.85F, 0.0F, 1.0F);
     }
     const std::uint32_t previousCheckpointCount = vehicle_.state().checkpointCount;
     const std::uint32_t previousCompletedLaps = vehicle_.state().completedLaps;
     const bool previouslyFinished = vehicle_.state().finished;
-    vehicle_.update(static_cast<float>(deltaSeconds), control);
+    vehicle_.update(static_cast<float>(raceStart.simulationSeconds), control);
     const tmnf::gameplay::VehicleState& vehicle = vehicle_.state();
-    renderer_.setVehiclePose(vehicle.position, vehicle.heading);
-    renderer_.setRaceHud(vehicle.raceTimeSeconds, vehicle.checkpointCount,
+    const float engineAcceleration = vehicle.speed >= 0.0F ? control.throttle : control.brake;
+    audio_.setEngineState(kDryEngineSpeedInput, vehicle.engineRpm, engineAcceleration);
+    renderer_.setVehiclePose(vehicle.position, vehicle.orientationWxyz,
+                             vehicle_.frontWheelSteeringRadians(), vehicle.speed, resetCamera);
+    renderer_.setRaceHud(vehicle.raceTimeSeconds, vehicle.speed, vehicle.checkpointCount,
                          static_cast<std::uint32_t>(vehicle_.checkpointTotal()),
                          vehicle.completedLaps, vehicle_.lapTotal(), vehicle.finished);
     if (vehicle.checkpointCount > previousCheckpointCount) {
@@ -436,13 +511,14 @@ private:
       audio_.playTone(940.0F, 0.12F);
     }
     if (vehicle.finished && !previouslyFinished) {
+      finishAdvanceSeconds_ = 0.0F;
       __android_log_print(ANDROID_LOG_INFO, "TMNF", "Race finished at %.3f s",
                           vehicle.raceTimeSeconds);
       recordFinish(vehicle.raceTimeSeconds);
       audio_.playSound(tmnf::android::RaceSound::Finish);
     }
     if ((control.throttle > 0.01F || control.brake > 0.01F || std::abs(control.steering) > 0.01F) &&
-        vehicle.elapsedSeconds - lastVehicleLogSeconds_ >= 0.5F) {
+        vehicle.elapsedSeconds - lastVehicleLogSeconds_ >= kVehicleLogIntervalSeconds) {
       lastVehicleLogSeconds_ = vehicle.elapsedSeconds;
       __android_log_print(ANDROID_LOG_DEBUG, "TMNF",
                           "Vehicle pose: position=(%.2f, %.2f, %.2f), speed=%.2f, heading=%.3f, "
@@ -453,12 +529,14 @@ private:
   }
 
   android_app* app_;
+  std::string runtimeDataRoot_;
   tmnf::platform::InputState input_;
   tmnf::android::InputAdapter inputAdapter_;
   tmnf::android::AudioOutput audio_;
   tmnf::android::EglRenderer renderer_;
   tmnf::content::ReferenceCampaignResult campaign_;
   tmnf::content::TrackCollision collision_;
+  tmnf::gameplay::RaceStartClock raceStart_;
   tmnf::gameplay::VehicleSimulation vehicle_;
   std::filesystem::path progressPath_;
   std::unordered_map<std::string, std::int32_t> records_;
@@ -468,6 +546,7 @@ private:
   bool focused_ = false;
   bool selectorVisible_ = false;
   bool previousTouchActive_ = false;
+  float finishAdvanceSeconds_ = 0.0F;
   float lastVehicleLogSeconds_ = -1.0F;
 };
 

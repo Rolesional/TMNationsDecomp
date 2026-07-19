@@ -1,0 +1,4 @@
+00401b80  MOV EAX,ECX
+00401b82  MOV ECX,dword ptr [EAX + 0x4]
+00401b85  MOV EDX,dword ptr [EAX + 0x8]
+00401b88  JMP EDX

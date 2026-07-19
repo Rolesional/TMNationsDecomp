@@ -116,6 +116,12 @@ int main(const int argc, const char* const* argv) {
   tmnf::gbx::Float3 maximum{std::numeric_limits<float>::lowest(),
                             std::numeric_limits<float>::lowest(),
                             std::numeric_limits<float>::lowest()};
+  tmnf::gbx::Float3 collisionMinimum{std::numeric_limits<float>::max(),
+                                     std::numeric_limits<float>::max(),
+                                     std::numeric_limits<float>::max()};
+  tmnf::gbx::Float3 collisionMaximum{std::numeric_limits<float>::lowest(),
+                                     std::numeric_limits<float>::lowest(),
+                                     std::numeric_limits<float>::lowest()};
   for (const tmnf::gbx::SolidVisual& visual : solid.visuals) {
     vertexCount += visual.positions.size();
     indexCount += visual.indices.size();
@@ -137,6 +143,20 @@ int main(const int argc, const char* const* argv) {
   for (const tmnf::gbx::SolidCollisionShape& shape : solid.collisionShapes) {
     collisionVertexCount += shape.positions.size();
     collisionIndexCount += shape.indices.size();
+    for (const tmnf::gbx::Float3 position : shape.positions) {
+      const auto& matrix = shape.transform;
+      const tmnf::gbx::Float3 transformed{
+          matrix[0] * position.x + matrix[1] * position.y + matrix[2] * position.z + matrix[9],
+          matrix[3] * position.x + matrix[4] * position.y + matrix[5] * position.z + matrix[10],
+          matrix[6] * position.x + matrix[7] * position.y + matrix[8] * position.z + matrix[11],
+      };
+      collisionMinimum.x = std::min(collisionMinimum.x, transformed.x);
+      collisionMinimum.y = std::min(collisionMinimum.y, transformed.y);
+      collisionMinimum.z = std::min(collisionMinimum.z, transformed.z);
+      collisionMaximum.x = std::max(collisionMaximum.x, transformed.x);
+      collisionMaximum.y = std::max(collisionMaximum.y, transformed.y);
+      collisionMaximum.z = std::max(collisionMaximum.z, transformed.z);
+    }
   }
   std::cout << "{\n"
             << "  \"storedPath\": \"" << jsonEscape(opened.storedPath) << "\",\n"
@@ -152,10 +172,15 @@ int main(const int argc, const char* const* argv) {
             << "  \"bounds\": {\"minimum\": [" << minimum.x << ", " << minimum.y << ", "
             << minimum.z << "], \"maximum\": [" << maximum.x << ", " << maximum.y << ", "
             << maximum.z << "]},\n"
+            << "  \"collisionBounds\": {\"minimum\": [" << collisionMinimum.x << ", "
+            << collisionMinimum.y << ", " << collisionMinimum.z << "], \"maximum\": ["
+            << collisionMaximum.x << ", " << collisionMaximum.y << ", " << collisionMaximum.z
+            << "]},\n"
             << "  \"collisionShapes\": [\n";
   for (std::size_t index = 0; index < solid.collisionShapes.size(); ++index) {
     const tmnf::gbx::SolidCollisionShape& shape = solid.collisionShapes[index];
-    std::cout << "    {\"type\": \"" << collisionTypeName(shape.type)
+    std::cout << "    {\"treeName\": \"" << jsonEscape(shape.treeName)
+              << "\", \"type\": \"" << collisionTypeName(shape.type)
               << "\", \"version\": " << shape.archiveVersion
               << ", \"surfaceId\": " << shape.surfaceId
               << ", \"vertices\": " << shape.positions.size()
@@ -167,6 +192,17 @@ int main(const int argc, const char* const* argv) {
               << ", \"positionMd5\": \"" << vectorMd5(shape.positions)
               << "\", \"indexMd5\": \"" << vectorMd5(shape.indices) << "\"}"
               << (index + 1U == solid.collisionShapes.size() ? "" : ",") << '\n';
+  }
+  std::cout << "  ],\n"
+            << "  \"treeTransforms\": [\n";
+  for (std::size_t index = 0; index < solid.treeTransforms.size(); ++index) {
+    const tmnf::gbx::SolidTreeTransform& tree = solid.treeTransforms[index];
+    std::cout << "    {\"name\": \"" << jsonEscape(tree.name) << "\", \"transform\": [";
+    for (std::size_t component = 0; component < tree.transform.size(); ++component) {
+      std::cout << tree.transform[component]
+                << (component + 1U == tree.transform.size() ? "" : ",");
+    }
+    std::cout << "]}" << (index + 1U == solid.treeTransforms.size() ? "" : ",") << '\n';
   }
   std::cout << "  ],\n"
             << "  \"visuals\": [\n";

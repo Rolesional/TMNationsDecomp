@@ -21,6 +21,8 @@ enum class BlockWaypointType : std::int32_t {
 struct BlockInfoMetadata final {
   std::optional<std::array<float, 12>> spawnGround;
   std::optional<std::array<float, 12>> spawnAir;
+  std::array<std::int32_t, 2> groundFootprint{1, 1};
+  std::array<std::int32_t, 2> airFootprint{1, 1};
   BlockWaypointType waypointType = BlockWaypointType::None;
   bool noRespawn = false;
 };

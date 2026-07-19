@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">TMNF Native Port</string>
+    <string name="import_instructions">TMNF needs files from your original PC installation. Copy the TmNationsForever folder to a normal device folder such as Download, then select that folder here. It must contain Packs and GameData.</string>
+    <string name="select_game_folder">Select game folder</string>
+    <string name="importing_game_data">Importing the original game data… Keep the app open.</string>
+    <string name="import_failed">Import failed: %1$s</string>
 </resources>
-
